@@ -11,14 +11,14 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       # Your GitHub Personal Access Token
-GITHUB_REPO = os.getenv("GITHUB_REPO")         # e.g., "username/repo-name"
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       
+GITHUB_REPO = os.getenv("GITHUB_REPO")         
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
-UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") # Your UPI ID from Render environment
-UPI_NAME = os.getenv("UPI_NAME", "MeghaBhai")  # Display name on UPI apps
+UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") 
+UPI_NAME = os.getenv("UPI_NAME", "MeghaBhai")  
 SUPPORT_CHAT_ID = "-5409271468"
-ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")     # Your Telegram Admin ID
+OBB_GROUP_LINK = "https://t.me/c/5409271468/1" # Configured with your group ID
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -27,10 +27,9 @@ app = Flask(__name__)
 active_checkout_sessions = {}  
 user_purchased_keys = {}  
 
-# --- GITHUB HELPERS ---
+# --- GITHUB HELPERS FOR KEYS ---
 def get_file_path_for_product(product_code):
     mapping = {
-        # Loader Keys Folder
         "buy_loader_5hours": "loader/keys_5h.txt",
         "buy_loader_1day": "loader/keys_1d.txt",
         "buy_loader_3days": "loader/keys_3d.txt",
@@ -38,7 +37,6 @@ def get_file_path_for_product(product_code):
         "buy_loader_30days": "loader/keys_30d.txt",
         "buy_loader_season": "loader/keys_season.txt",
         
-        # BGMI Keys Folder
         "buy_bgmi_5hours": "bgmi/keys_5h.txt",
         "buy_bgmi_1day": "bgmi/keys_1d.txt",
         "buy_bgmi_3days": "bgmi/keys_3d.txt",
@@ -172,7 +170,7 @@ def handle_check_fund_text(message):
 def handle_how_to_buy_text(message):
     bot.send_message(
         message.chat.id,
-        "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your product & duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key and app file will be delivered instantly upon payment verification!",
+        "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your product & duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key and app files will be delivered instantly upon payment verification!",
         parse_mode="Markdown"
     )
 
@@ -269,7 +267,7 @@ def handle_callback(call):
                     f"📦 Product: `{product_name}`\n"
                     f"💰 Amount: **₹{price}**\n\n"
                     f"📱 **Scan the QR code above** using GPay, PhonePe, or Paytm to pay instantly.\n\n"
-                    f"⚡ Once paid, MacroDroid will instantly notify this bot and your key & app file will be delivered automatically!",
+                    f"⚡ Once paid, MacroDroid will instantly notify this bot and your key & files will be delivered automatically!",
             parse_mode="Markdown"
         )
         
@@ -285,7 +283,7 @@ def handle_callback(call):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Megha Bhai Bot with Post-Payment APK Delivery is running successfully!"
+    return "Megha Bhai Bot with Group OBB Redirect is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -353,22 +351,34 @@ def macro_webhook():
                                 parse_mode="Markdown"
                             )
                             
-                            # Automatically send the specific APK based on whether it's loader or bgmi
+                            # Deliver Files / Group Link based on product type
                             is_loader = "loader" in product_code
-                            apk_filename = "loader.apk" if is_loader else "bgmi.apk"
-                            apk_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/apks/{apk_filename}"
-                            
                             try:
-                                bot.send_document(
-                                    user_id,
-                                    document=apk_url,
-                                    caption=f"📥 Here is your application file for {product_name}!"
-                                )
+                                if is_loader:
+                                    loader_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/apks/loader.apk"
+                                    bot.send_document(user_id, document=loader_url, caption="📥 Here is your Loader APK file!")
+                                else:
+                                    # Send BGMI APK
+                                    bgmi_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/apks/bgmi.apk"
+                                    bot.send_document(user_id, document=bgmi_url, caption="📥 Here is your BGMI APK file!")
+                                    
+                                    # Send OBB Group Link Button using your group ID
+                                    obb_markup = InlineKeyboardMarkup()
+                                    obb_markup.add(InlineKeyboardButton("📥 Download OBB File in Group", url=OBB_GROUP_LINK))
+                                    
+                                    bot.send_message(
+                                        user_id,
+                                        "📦 **BGMI OBB File Download:**\n\n"
+                                        "Due to its large size (1.24 GB), the OBB file (`main.21325.com.pubg.imobile.obb`) is available in our official download group.\n\n"
+                                        "👉 Click the button below to join the group and download the OBB file:",
+                                        reply_markup=obb_markup,
+                                        parse_mode="Markdown"
+                                    )
                             except Exception as doc_err:
-                                print("Error sending APK document:", doc_err)
+                                print("Error sending document/message:", doc_err)
 
                             del active_checkout_sessions[matched_order_id]
-                            return jsonify({"status": "success", "message": "Key and APK delivered"}), 200
+                            return jsonify({"status": "success", "message": "Key and files delivered"}), 200
                     else:
                         bot.send_message(
                             user_id,
