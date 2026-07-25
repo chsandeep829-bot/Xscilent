@@ -187,6 +187,23 @@ def handle_callback(call):
     chat_id = call.message.chat.id
     data = call.data
 
+    if data.startswith("cancel_"):
+        order_id = data.replace("cancel_", "")
+        if order_id in active_checkout_sessions:
+            del active_checkout_sessions[order_id]
+        try:
+            bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                caption="❌ **Payment Cancelled**\n\nThis checkout session has been cancelled.",
+                reply_markup=None,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            print("Error editing cancelled message:", e)
+        bot.answer_callback_query(call.id, "❌ Payment cancelled successfully.")
+        return
+
     if data.startswith("buy_"):
         product_name, price = get_product_details(data)
         file_path = get_file_path_for_product(data)
@@ -224,6 +241,9 @@ def handle_callback(call):
         except Exception:
             pass
             
+        cancel_markup = InlineKeyboardMarkup()
+        cancel_markup.add(InlineKeyboardButton("❌ Cancel Payment", callback_data=f"cancel_{order_id}"))
+
         sent_msg = bot.send_photo(
             chat_id,
             photo=bio,
@@ -232,6 +252,7 @@ def handle_callback(call):
                     f"💰 Amount: **₹{price}**\n\n"
                     f"📱 **Scan the QR code above** using GPay, PhonePe, or Paytm to pay instantly.\n\n"
                     f"⚡ Once paid, MacroDroid will instantly notify this bot and your key & download link will be delivered automatically!",
+            reply_markup=cancel_markup,
             parse_mode="Markdown"
         )
         
