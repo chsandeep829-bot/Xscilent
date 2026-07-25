@@ -5,7 +5,7 @@ import base64
 import io
 import qrcode
 import requests
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
@@ -15,7 +15,6 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       # Your GitHub Personal Access Tok
 GITHUB_REPO = os.getenv("GITHUB_REPO")         # e.g., "username/repo-name"
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
-SMS_CHAT_ID = os.getenv("SMS_CHAT_ID")         # Restrict SMS parsing to this specific Chat ID
 UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") # Your UPI ID from Render environment
 UPI_NAME = os.getenv("UPI_NAME", "Xscilent")   # Display name on UPI apps
 
@@ -91,7 +90,7 @@ def send_welcome(message):
     )
 
 @bot.message_handler(func=lambda message: True)
-def handle_incoming_message(message):
+def handle_text_selection(message):
     text = message.text or ""
     chat_id = message.chat.id
     
@@ -104,7 +103,6 @@ def handle_incoming_message(message):
         "XSCILENT FULL SEASON - ₹1200": 1200.0
     }
     
-    # 1. Handle user clicking a buy button in private chat
     if text in product_map:
         price = product_map[text]
         order_id = str(int(time.time()))
@@ -137,59 +135,18 @@ def handle_incoming_message(message):
                     f"📦 Product: `{text}`\n"
                     f"💰 Amount: **₹{price}**\n\n"
                     f"📱 **Scan the QR code above** using GPay, PhonePe, or Paytm to pay instantly.\n\n"
-                    f"⚡ Once paid, your SMS forwarder app will notify this bot and your key will be delivered automatically!",
+                    f"⚡ Once paid, MacroDroid will instantly notify this bot and your key will be delivered automatically!",
             parse_mode="Markdown"
         )
-        return
-
-    # 2. Handle forwarded SMS payment notifications from the authorized group
-    if SMS_CHAT_ID and str(chat_id) != str(SMS_CHAT_ID):
-        return  # Ignore messages from other chats for security
-
-    amount_match = re.search(r'(?:₹|Rs\.?)\s*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
-    if amount_match:
-        received_amount = float(amount_match.group(1))
-        print(f"🔍 Detected amount from authorized SMS stream: ₹{received_amount}")
-        
-        matched_order_id = None
-        latest_time = 0
-        for order_id, session in active_checkout_sessions.items():
-            if session["price"] == received_amount and session["timestamp"] > latest_time:
-                latest_time = session["timestamp"]
-                matched_order_id = order_id
-                
-        session = active_checkout_sessions.get(matched_order_id)
-        if session:
-            user_id = session["userId"]
-            product = session["product"]
-            file_path = get_file_path_for_product(product)
-            
-            if file_path:
-                keys, _ = fetch_keys_from_github(file_path)
-                if keys:
-                    delivered_key = keys[0]
-                    success = remove_key_from_github(file_path, delivered_key)
-                    
-                    if success:
-                        bot.send_message(
-                            user_id,
-                            f"✅ **Payment Verified via SMS & Key Delivered!**\n\n📦 Product: `{product}`\n🔑 Your Key:\n`{delivered_key}`",
-                            parse_mode="Markdown"
-                        )
-                        del active_checkout_sessions[matched_order_id]
-                        return
-                else:
-                    bot.send_message(
-                        user_id,
-                        f"⚠️ Payment received for **{product}**, but keys are currently out of stock!",
-                        parse_mode="Markdown"
-                    )
+    else:
+        bot.send_message(chat_id, "Please select a valid plan using the buttons below, or type /start.")
 
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Telegram UPI Bot (QR Code Mode) is running successfully!"
+    return "Telegram UPI Bot (MacroDroid Webhook Mode) is running successfully!"
 
+# 1. Telegram Webhook Route
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -198,6 +155,63 @@ def telegram_webhook():
         bot.process_new_updates([update])
         return '', 200
     return 'Forbidden', 403
+
+# 2. MacroDroid Notification Webhook Route
+@app.route('/webhook', methods=['POST', 'GET'])
+def macro_webhook():
+    try:
+        body = {}
+        if request.is_json:
+            body = request.get_json(silent=True) or {}
+        elif request.form:
+            body = request.form.to_dict()
+
+        text = str(body.get('text', '')) or request.data.decode('utf-8', errors='ignore')
+        print("📥 MacroDroid Webhook Payload Received:", text)
+
+        amount_match = re.search(r'(?:₹|Rs\.?)\s*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+        if amount_match:
+            received_amount = float(amount_match.group(1))
+            print(f"🔍 Detected amount from MacroDroid webhook: ₹{received_amount}")
+            
+            matched_order_id = None
+            latest_time = 0
+            for order_id, session in active_checkout_sessions.items():
+                if session["price"] == received_amount and session["timestamp"] > latest_time:
+                    latest_time = session["timestamp"]
+                    matched_order_id = order_id
+                    
+            session = active_checkout_sessions.get(matched_order_id)
+            if session:
+                user_id = session["userId"]
+                product = session["product"]
+                file_path = get_file_path_for_product(product)
+                
+                if file_path:
+                    keys, _ = fetch_keys_from_github(file_path)
+                    if keys:
+                        delivered_key = keys[0]
+                        success = remove_key_from_github(file_path, delivered_key)
+                        
+                        if success:
+                            bot.send_message(
+                                user_id,
+                                f"✅ **Payment Verified via Notification & Key Delivered!**\n\n📦 Product: `{product}`\n🔑 Your Key:\n`{delivered_key}`",
+                                parse_mode="Markdown"
+                            )
+                            del active_checkout_sessions[matched_order_id]
+                            return jsonify({"status": "success", "message": "Key delivered"}), 200
+                    else:
+                        bot.send_message(
+                            user_id,
+                            f"⚠️ Payment received for **{product}**, but keys are currently out of stock!",
+                            parse_mode="Markdown"
+                        )
+                        
+        return jsonify({"status": "received"}), 200
+    except Exception as error:
+        print("Webhook error:", error)
+        return jsonify({"error": str(error)}), 200
 
 if __name__ == '__main__':
     webhook_url = f"{RENDER_URL}/bot/{TOKEN}"
