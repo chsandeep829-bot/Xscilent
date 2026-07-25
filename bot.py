@@ -75,7 +75,7 @@ def get_file_path_for_product(product_code):
         "buy_loader_7days": "loader/keys_7d.txt",
         "buy_loader_15days": "loader/keys_15d.txt",
         "buy_loader_30days": "loader/keys_30d.txt",
-        "buy_loader_60days": "loader/keys_6d.txt"
+        "buy_loader_60days": "loader/keys_60d.txt"
     }
     return mapping.get(product_code)
 
