@@ -12,15 +12,15 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       
-GITHUB_REPO = os.getenv("GITHUB_REPO")         
+GITHUB_REPO = os.getenv("GITHUB_REPO", "chsandeep829-bot/Xscilent")         
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
 UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") 
 UPI_NAME = os.getenv("UPI_NAME", "Xscilent")  
 SUPPORT_CHAT_ID = "-5409271468"
 
-# GitHub Release download link for Loader APK
-LOADER_APK_LINK = os.getenv("LOADER_APK_LINK", "https://github.com/chsandeep829-bot/Xscilent/releases/download/v1.0.0/loader.apk")
+# Raw GitHub URL for loader.apk from main branch
+LOADER_APK_LINK = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/loader.apk"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -28,6 +28,7 @@ app = Flask(__name__)
 # In-memory storage
 active_checkout_sessions = {}  
 user_purchased_keys = {}  
+user_key_downloads = {}  # Tracks remaining downloads per (user_id, key) -> Default 2
 
 # --- GITHUB HELPERS FOR KEYS ---
 def get_file_path_for_product(product_code):
@@ -150,11 +151,22 @@ def handle_purchase_text(message):
 def handle_my_keys_text(message):
     user_id = message.from_user.id
     keys = user_purchased_keys.get(user_id, [])
-    if keys:
-        keys_text = "\n".join([f"`{k}`" for k in keys])
-        bot.send_message(message.chat.id, f"📋 **Your Purchased Keys:**\n\n{keys_text}", parse_mode="Markdown")
-    else:
+    if not keys:
         bot.send_message(message.chat.id, "📋 You haven't purchased any keys yet.", parse_mode="Markdown")
+        return
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    for k in keys:
+        rem = user_key_downloads.get((user_id, k), 2)
+        markup.add(InlineKeyboardButton(f"📥 Download APK for {k[:8]}... ({rem}/2 left)", callback_data=f"dl_key_{k}"))
+    
+    keys_text = "\n".join([f"`{k}` (Downloads left: {user_key_downloads.get((user_id, k), 2)}/2)" for k in keys])
+    bot.send_message(
+        message.chat.id,
+        f"📋 **Your Purchased Keys & Downloads:**\n\n{keys_text}\n\nClick below to download your APK (Limit: 2 times per key):",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
 
 @bot.message_handler(func=lambda message: message.text == "💰 Check Fund")
 def handle_check_fund_text(message):
@@ -192,16 +204,43 @@ def handle_callback(call):
         if order_id in active_checkout_sessions:
             del active_checkout_sessions[order_id]
         try:
-            bot.edit_message_caption(
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                caption="❌ **Payment Cancelled**\n\nThis checkout session has been cancelled.",
-                reply_markup=None,
-                parse_mode="Markdown"
-            )
+            bot.delete_message(chat_id, call.message.message_id)
         except Exception as e:
-            print("Error editing cancelled message:", e)
-        bot.answer_callback_query(call.id, "❌ Payment cancelled successfully.")
+            print("Error deleting cancelled QR message:", e)
+        bot.answer_callback_query(call.id, "❌ Payment cancelled and QR removed.")
+        return
+
+    if data.startswith("dl_key_"):
+        key_str = data.replace("dl_key_", "")
+        user_id = call.from_user.id
+        
+        if key_str not in user_purchased_keys.get(user_id, []):
+            bot.answer_callback_query(call.id, "❌ Key not found in your account!", show_alert=True)
+            return
+            
+        rem = user_key_downloads.get((user_id, key_str), 2)
+        if rem <= 0:
+            bot.answer_callback_query(call.id, "❌ Download limit reached (0/2) for this key!", show_alert=True)
+            return
+            
+        # Decrement download count
+        user_key_downloads[(user_id, key_str)] = rem - 1
+        new_rem = rem - 1
+        
+        bot.answer_callback_query(call.id, f"✅ Download authorized! ({new_rem}/2 left)")
+        
+        link_markup = InlineKeyboardMarkup()
+        link_markup.add(InlineKeyboardButton("📥 Click Here to Download APK", url=LOADER_APK_LINK))
+        
+        bot.send_message(
+            chat_id,
+            f"🚀 **Xscilent Loader APK Download**\n\n"
+            f"🔑 Key: `{key_str}`\n"
+            f"📊 Remaining Downloads for this key: **{new_rem}/2**\n\n"
+            f"Click the button below to download your file:",
+            reply_markup=link_markup,
+            parse_mode="Markdown"
+        )
         return
 
     if data.startswith("buy_"):
@@ -320,6 +359,9 @@ def macro_webhook():
                             if user_id not in user_purchased_keys:
                                 user_purchased_keys[user_id] = []
                             user_purchased_keys[user_id].append(delivered_key)
+                            
+                            # Initialize download limit to 2 for this key
+                            user_key_downloads[(user_id, delivered_key)] = 2
 
                             try:
                                 bot.delete_message(chat_id=user_id, message_id=session["message_id"])
@@ -332,18 +374,18 @@ def macro_webhook():
                                 f"✅ **Payment Verified & Key Delivered!**\n\n"
                                 f"📦 Product: `{product_name}`\n"
                                 f"🔑 Your Key:\n`{delivered_key}`\n\n"
-                                f"(You can view your keys anytime using 'My Keys' in the menu)",
+                                f"(You can view your keys and download links anytime using 'My Keys' in the menu)",
                                 parse_mode="Markdown"
                             )
                             
-                            # Deliver Download Link via Inline Button
+                            # Deliver Download Link via Interactive Button with Limit tracking
                             try:
                                 link_markup = InlineKeyboardMarkup()
-                                link_markup.add(InlineKeyboardButton("📥 Download Xscilent Loader APK", url=LOADER_APK_LINK))
+                                link_markup.add(InlineKeyboardButton("📥 Download Xscilent Loader APK (2/2 left)", callback_data=f"dl_key_{delivered_key}"))
                                 bot.send_message(
                                     user_id,
                                     "🚀 **Loader App Download:**\n\n"
-                                    "Click the button below to download your loader application:",
+                                    "Click the button below to download your loader application (Allowed: 2 times):",
                                     reply_markup=link_markup,
                                     parse_mode="Markdown"
                                 )
