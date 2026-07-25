@@ -9,13 +9,6 @@ from flask import Flask, request, jsonify
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
-# Safe import for Twilio so deployment never fails with ModuleNotFoundError
-try:
-    from twilio.rest import Client
-    TWILIO_AVAILABLE = True
-except ImportError:
-    TWILIO_AVAILABLE = False
-
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       
@@ -25,13 +18,10 @@ RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
 UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") 
 UPI_NAME = os.getenv("UPI_NAME", "Xscilent")  
 SUPPORT_CHAT_ID = "-5409271468"
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # Set your Telegram Admin User ID
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 
-# Twilio Configuration for Owner SMS & Call Alerts (+91 9494524588)
-TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
-TWILIO_FROM = os.getenv("TWILIO_PHONE_NUMBER", "")
-OWNER_PHONE = "+919494524588"
+# MacroDroid Webhook URL for loud phone alarm/voice alerts
+MACRODROID_URL = os.getenv("MACRODROID_WEBHOOK_URL", "")
 
 # Raw GitHub URL for loader.apk from main branch
 LOADER_APK_LINK = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/loader.apk"
@@ -42,11 +32,11 @@ app = Flask(__name__)
 # In-memory storage & tracking
 active_checkout_sessions = {}  
 user_purchased_keys = {}  
-user_key_downloads = {}  # Tracks remaining downloads per (user_id, key) -> Default 2
+user_key_downloads = {}  
 
 # Admin financial & buyer records
 total_collection = 0.0
-buyer_records = []  # List of dicts storing buyer details
+buyer_records = []  
 
 # --- ALERT HELPER FOR OUT OF STOCK ---
 def alert_owner_out_of_stock(product_name):
@@ -62,29 +52,18 @@ def alert_owner_out_of_stock(product_name):
         except Exception as e:
             print("Error sending admin telegram alert:", e)
 
-    # 2. Send SMS and Make Call via Twilio (if installed & configured)
-    if TWILIO_AVAILABLE and TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM:
+    # 2. Trigger MacroDroid Webhook to play alarm/voice alert locally on your phone
+    if MACRODROID_URL:
         try:
-            client = Client(TWILIO_SID, TWILIO_TOKEN)
-            
-            # Send SMS
-            client.messages.create(
-                body=f"ALERT: Xscilent Loader product {product_name} is OUT OF STOCK! Please refill keys immediately.",
-                from_=TWILIO_FROM,
-                to=OWNER_PHONE
+            response = requests.post(
+                MACRODROID_URL, 
+                json={"product": product_name, "status": "out_of_stock"}
             )
-            
-            # Make Voice Call
-            client.calls.create(
-                twiml=f'<Response><Say>Alert! Xscilent Loader product {product_name} is out of stock. Please refill keys immediately.</Say></Response>',
-                from_=TWILIO_FROM,
-                to=OWNER_PHONE
-            )
-            print("📞 Twilio SMS & Call sent successfully to owner (+91 9494524588).")
+            print(f"📱 MacroDroid Webhook Triggered Successfully: HTTP {response.status_code}")
         except Exception as e:
-            print("Twilio alert error:", e)
+            print(f"❌ MacroDroid Webhook Error: {str(e)}")
     else:
-        print("⚠️ Twilio package or credentials not configured. SMS/Call skipped, Telegram alert sent.")
+        print("⚠️ MACRODROID_WEBHOOK_URL environment variable is missing.")
 
 # --- GITHUB HELPERS FOR KEYS ---
 def get_file_path_for_product(product_code):
@@ -96,13 +75,12 @@ def get_file_path_for_product(product_code):
         "buy_loader_7days": "loader/keys_7d.txt",
         "buy_loader_15days": "loader/keys_15d.txt",
         "buy_loader_30days": "loader/keys_30d.txt",
-        "buy_loader_60days": "loader/keys_6d.txt"
+        "buy_loader_60days": "loader/keys_60d.txt"
     }
     return mapping.get(product_code)
 
 def get_product_details(product_code):
     cat_prefix = "Xscilent Loader"
-    
     if "1hour" in product_code:
         return (f"{cat_prefix} - 1 HOUR", 20.0)
     elif "5hours" in product_code:
@@ -348,7 +326,7 @@ def handle_callback(call):
                     pass
                 bot.send_message(
                     chat_id,
-                    f"❌ **Out of Stock!**\n\nSorry, **{product_name}** is currently out of stock on GitHub. The owner has been immediately notified to refill keys. Please check back later!",
+                    f"❌ **Out of Stock!**\n\nSorry, **{product_name}** is currently out of stock on GitHub. The owner has been alerted with an alarm. Please check back later!",
                     parse_mode="Markdown"
                 )
                 return
@@ -507,7 +485,7 @@ def macro_webhook():
                         alert_owner_out_of_stock(product_name)
                         bot.send_message(
                             user_id,
-                            f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub! The owner has been alerted.",
+                            f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub! The owner has been alerted with an alarm.",
                             parse_mode="Markdown"
                         )
                         
