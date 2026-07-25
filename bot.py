@@ -7,7 +7,7 @@ import qrcode
 import requests
 from flask import Flask, request, jsonify
 import telebot
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -17,24 +17,37 @@ GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
 UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") # Your UPI ID from Render environment
 UPI_NAME = os.getenv("UPI_NAME", "Xscilent")   # Display name on UPI apps
+SUPPORT_CHAT_ID = "-5409271468"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# In-memory storage for active checkout sessions
+# In-memory storage
 active_checkout_sessions = {}  
+user_purchased_keys = {}  # Stores keys bought by users: {user_id: [key1, key2]}
 
 # --- GITHUB KEY MANAGEMENT HELPERS ---
-def get_file_path_for_product(product_name):
+def get_file_path_for_product(product_code):
     mapping = {
-        "XSCILENT 5 HOURS - ₹40": "keys/5hours.txt",
-        "XSCILENT 1 DAY - ₹100": "keys/1day.txt",
-        "XSCILENT 3 DAYS - ₹180": "keys/3days.txt",
-        "XSCILENT 7 DAYS - ₹300": "keys/7days.txt",
-        "XSCILENT 30 DAYS - ₹800": "keys/30days.txt",
-        "XSCILENT FULL SEASON - ₹1200": "keys/fullseason.txt"
+        "buy_5hours": "keys_5h.txt",
+        "buy_1day": "keys_1d.txt",
+        "buy_3days": "keys_3d.txt",
+        "buy_7days": "keys_7d.txt",
+        "buy_30days": "keys_30d.txt",
+        "buy_season": "keys_season.txt"
     }
-    return mapping.get(product_name)
+    return mapping.get(product_code)
+
+def get_product_details(product_code):
+    mapping = {
+        "buy_5hours": ("XSCILENT 5 HOURS", 40.0),
+        "buy_1day": ("XSCILENT 1 DAY", 100.0),
+        "buy_3days": ("XSCILENT 3 DAYS", 180.0),
+        "buy_7days": ("XSCILENT 7 DAYS", 300.0),
+        "buy_30days": ("XSCILENT 30 DAYS", 800.0),
+        "buy_season": ("XSCILENT FULL SEASON", 1200.0)
+    }
+    return mapping.get(product_code, ("Unknown Product", 0.0))
 
 def fetch_keys_from_github(file_path):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
@@ -70,49 +83,108 @@ def remove_key_from_github(file_path, key_to_remove):
     response = requests.put(url, headers=headers, json=payload)
     return response.status_code in [200, 201]
 
+# --- KEYBOARDS ---
+def get_main_menu():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🔑 Purchase Key", callback_data="menu_purchase"),
+        InlineKeyboardButton("📋 My Keys", callback_data="menu_my_keys"),
+        InlineKeyboardButton("💰 Check Fund", callback_data="menu_check_fund"),
+        InlineKeyboardButton("📚 How to Buy?", callback_data="menu_how_to_buy")
+    )
+    markup.row(
+        InlineKeyboardButton("🆔 My ID", callback_data="menu_my_id"),
+        InlineKeyboardButton("🆘 Contact Support", callback_data="menu_support")
+    )
+    return markup
+
+def get_products_menu():
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("5 Hours - ₹40", callback_data="buy_5hours"),
+        InlineKeyboardButton("1 Day - ₹100", callback_data="buy_1day"),
+        InlineKeyboardButton("3 Days - ₹180", callback_data="buy_3days"),
+        InlineKeyboardButton("7 Days - ₹300", callback_data="buy_7days"),
+        InlineKeyboardButton("30 Days - ₹800", callback_data="buy_30days"),
+        InlineKeyboardButton("Full Season - ₹1200", callback_data="buy_season")
+    )
+    markup.add(InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"))
+    return markup
+
 # --- TELEGRAM BOT HANDLERS ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(
-        KeyboardButton("XSCILENT 5 HOURS - ₹40"),
-        KeyboardButton("XSCILENT 1 DAY - ₹100"),
-        KeyboardButton("XSCILENT 3 DAYS - ₹180"),
-        KeyboardButton("XSCILENT 7 DAYS - ₹300"),
-        KeyboardButton("XSCILENT 30 DAYS - ₹800"),
-        KeyboardButton("XSCILENT FULL SEASON - ₹1200")
-    )
     bot.send_message(
         message.chat.id,
-        "👋 **Welcome to Xscilent Bot!**\n\nSelect a plan below to create your checkout session:",
-        reply_markup=markup,
+        "👋 **Welcome to Xscilent Bot!**\n\nChoose an option from the menu below:",
+        reply_markup=get_main_menu(),
         parse_mode="Markdown"
     )
 
-@bot.message_handler(func=lambda message: True)
-def handle_text_selection(message):
-    text = message.text or ""
-    chat_id = message.chat.id
-    
-    product_map = {
-        "XSCILENT 5 HOURS - ₹40": 40.0,
-        "XSCILENT 1 DAY - ₹100": 100.0,
-        "XSCILENT 3 DAYS - ₹180": 180.0,
-        "XSCILENT 7 DAYS - ₹300": 300.0,
-        "XSCILENT 30 DAYS - ₹800": 800.0,
-        "XSCILENT FULL SEASON - ₹1200": 1200.0
-    }
-    
-    if text in product_map:
-        price = product_map[text]
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    data = call.data
+
+    if data == "menu_main":
+        try:
+            bot.edit_message_text(
+                "👋 **Main Menu:**\n\nChoose an option below:",
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                reply_markup=get_main_menu(),
+                parse_mode="Markdown"
+            )
+        except Exception:
+            bot.send_message(chat_id, "👋 **Main Menu:**", reply_markup=get_main_menu(), parse_mode="Markdown")
+
+    elif data == "menu_purchase":
+        bot.edit_message_text(
+            "📦 **Select a plan to purchase:**",
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=get_products_menu(),
+            parse_mode="Markdown"
+        )
+
+    elif data == "menu_my_keys":
+        keys = user_purchased_keys.get(user_id, [])
+        if keys:
+            keys_text = "\n".join([f"`{k}`" for k in keys])
+            bot.answer_callback_query(call.id, "Here are your keys!")
+            bot.send_message(chat_id, f"📋 **Your Purchased Keys:**\n\n{keys_text}", parse_mode="Markdown")
+        else:
+            bot.answer_callback_query(call.id, "No keys found!", show_alert=True)
+            bot.send_message(chat_id, "📋 You haven't purchased any keys yet.", parse_mode="Markdown")
+
+    elif data == "menu_check_fund":
+        bot.answer_callback_query(call.id, "Balance checked")
+        bot.send_message(chat_id, "💰 **Your Account Balance:**\n\n₹0.0 (Direct UPI QR payment mode active)", parse_mode="Markdown")
+
+    elif data == "menu_how_to_buy":
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            chat_id,
+            "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your desired duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key will be delivered instantly upon payment verification!",
+            parse_mode="Markdown"
+        )
+
+    elif data == "menu_my_id":
+        bot.answer_callback_query(call.id)
+        bot.send_message(chat_id, f"🆔 **Your Telegram Info:**\n\nUser ID: `{user_id}`\nUsername: @{call.from_user.username or 'None'}", parse_mode="Markdown")
+
+    elif data == "menu_support":
+        bot.answer_callback_query(call.id, "Opening Support Group...")
+        bot.send_message(
+            chat_id,
+            f"🆘 **Contact Support:**\n\nClick the link below to open our support group:\n👉 [Open Support Group](https://t.me/c/{SUPPORT_CHAT_ID.replace('-100', '').replace('-', '')}/1)",
+            parse_mode="Markdown"
+        )
+
+    elif data.startswith("buy_"):
+        product_name, price = get_product_details(data)
         order_id = str(int(time.time()))
-        
-        active_checkout_sessions[order_id] = {
-            "userId": chat_id,
-            "product": text,
-            "price": price,
-            "timestamp": time.time()
-        }
         
         # Construct UPI Payment Link
         upi_url = f"upi://pay?pa={UPI_VPA}&pn={UPI_NAME}&am={price}&cu=INR"
@@ -128,25 +200,32 @@ def handle_text_selection(message):
         img.save(bio, 'PNG')
         bio.seek(0)
         
-        bot.send_photo(
+        bot.delete_message(chat_id, call.message.message_id)
+        sent_msg = bot.send_photo(
             chat_id,
             photo=bio,
             caption=f"💳 **Checkout Session Created!**\n\n"
-                    f"📦 Product: `{text}`\n"
+                    f"📦 Product: `{product_name}`\n"
                     f"💰 Amount: **₹{price}**\n\n"
                     f"📱 **Scan the QR code above** using GPay, PhonePe, or Paytm to pay instantly.\n\n"
                     f"⚡ Once paid, MacroDroid will instantly notify this bot and your key will be delivered automatically!",
             parse_mode="Markdown"
         )
-    else:
-        bot.send_message(chat_id, "Please select a valid plan using the buttons below, or type /start.")
+        
+        active_checkout_sessions[order_id] = {
+            "userId": chat_id,
+            "product_code": data,
+            "product_name": product_name,
+            "price": price,
+            "timestamp": time.time(),
+            "message_id": sent_msg.message_id
+        }
 
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Telegram UPI Bot (MacroDroid Webhook Mode) is running successfully!"
+    return "Telegram UPI Bot with Custom Menu is running successfully!"
 
-# 1. Telegram Webhook Route
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -156,7 +235,6 @@ def telegram_webhook():
         return '', 200
     return 'Forbidden', 403
 
-# 2. MacroDroid Notification Webhook Route
 @app.route('/webhook', methods=['POST', 'GET'])
 def macro_webhook():
     try:
@@ -184,8 +262,8 @@ def macro_webhook():
             session = active_checkout_sessions.get(matched_order_id)
             if session:
                 user_id = session["userId"]
-                product = session["product"]
-                file_path = get_file_path_for_product(product)
+                product_name = session["product_name"]
+                file_path = get_file_path_for_product(session["product_code"])
                 
                 if file_path:
                     keys, _ = fetch_keys_from_github(file_path)
@@ -194,17 +272,30 @@ def macro_webhook():
                         success = remove_key_from_github(file_path, delivered_key)
                         
                         if success:
+                            # Save key to user's storage
+                            if user_id not in user_purchased_keys:
+                                user_purchased_keys[user_id] = []
+                            user_purchased_keys[user_id].append(delivered_key)
+
+                            # Delete QR code message
+                            try:
+                                bot.delete_message(chat_id=user_id, message_id=session["message_id"])
+                            except Exception as del_err:
+                                print("Could not delete QR message:", del_err)
+                            
                             bot.send_message(
                                 user_id,
-                                f"✅ **Payment Verified via Notification & Key Delivered!**\n\n📦 Product: `{product}`\n🔑 Your Key:\n`{delivered_key}`",
+                                f"✅ **Payment Verified & Key Delivered!**\n\n📦 Product: `{product_name}`\n🔑 Your Key:\n`{delivered_key}`\n\n(You can also view your keys anytime using 'My Keys' in the menu)",
+                                reply_markup=get_main_menu(),
                                 parse_mode="Markdown"
                             )
                             del active_checkout_sessions[matched_order_id]
-                            return jsonify({"status": "success", "message": "Key delivered"}), 200
+                            return jsonify({"status": "success", "message": "Key delivered and QR deleted"}), 200
                     else:
                         bot.send_message(
                             user_id,
-                            f"⚠️ Payment received for **{product}**, but keys are currently out of stock!",
+                            f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub!",
+                            reply_markup=get_main_menu(),
                             parse_mode="Markdown"
                         )
                         
