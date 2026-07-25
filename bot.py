@@ -248,13 +248,29 @@ def handle_apk_upload(message):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     chat_id = call.message.chat.id
-    user_id = call.from_user.id
     data = call.data
 
     if data.startswith("buy_"):
         product_name, price = get_product_details(data)
-        order_id = str(int(time.time()))
+        file_path = get_file_path_for_product(data)
         
+        # Check stock before generating QR code to prevent user loss
+        if file_path:
+            keys, _ = fetch_keys_from_github(file_path)
+            if not keys:
+                bot.answer_callback_query(call.id, "❌ Out of Stock!", show_alert=True)
+                try:
+                    bot.delete_message(chat_id, call.message.message_id)
+                except Exception:
+                    pass
+                bot.send_message(
+                    chat_id,
+                    f"❌ **Out of Stock!**\n\nSorry, **{product_name}** is currently out of stock on GitHub. No QR code has been generated. Please check back later!",
+                    parse_mode="Markdown"
+                )
+                return
+
+        order_id = str(int(time.time()))
         upi_url = f"upi://pay?pa={UPI_VPA}&pn={UPI_NAME}&am={price}&cu=INR"
         
         qr = qrcode.QRCode(version=1, box_size=10, border=4)
@@ -295,7 +311,7 @@ def handle_callback(call):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Telegram UPI Bot with Persistent Keyboard is running successfully!"
+    return "Telegram UPI Bot with Stock Protection is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
