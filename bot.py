@@ -6,7 +6,7 @@ import threading
 import requests
 from flask import Flask, request, jsonify
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -70,81 +70,57 @@ def remove_key_from_github(file_path, key_to_remove):
 # --- TELEGRAM BOT HANDLERS ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔑 Purchase Key", callback_data="shop_menu"))
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add(
+        KeyboardButton("XSCILENT 5 HOURS - ₹40"),
+        KeyboardButton("XSCILENT 1 DAY - ₹100"),
+        KeyboardButton("XSCILENT 3 DAYS - ₹180"),
+        KeyboardButton("XSCILENT 7 DAYS - ₹300"),
+        KeyboardButton("XSCILENT 30 DAYS - ₹800"),
+        KeyboardButton("XSCILENT FULL SEASON - ₹1200")
+    )
     bot.send_message(
         message.chat.id,
-        "👋 **Welcome to Xscilent Bot!**\n\nClick below to browse and purchase available keys automatically.",
+        "👋 **Welcome to Xscilent Bot!**\n\nSelect a plan below to purchase your key automatically:",
         reply_markup=markup,
         parse_mode="Markdown"
     )
 
-@bot.callback_query_handler(func=lambda call: True)
-def handle_query(call):
-    chat_id = call.message.chat.id
-    data = call.data
+@bot.message_handler(func=lambda message: True)
+def handle_text_selection(message):
+    chat_id = message.chat.id
+    text = message.text
     
-    if data == "shop_menu":
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📦 XSCILENT LOADER", callback_data="loader_menu"))
-        bot.edit_message_text(
-            "📂 **Select a category:**",
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            reply_markup=markup,
-            parse_mode="Markdown"
-        )
-        
-    elif data == "loader_menu":
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("XSCILENT 5 HOURS - ₹40", callback_data="buy_5hours"))
-        markup.add(InlineKeyboardButton("XSCILENT 1 DAY - ₹100", callback_data="buy_1day"))
-        markup.add(InlineKeyboardButton("XSCILENT 3 DAYS - ₹180", callback_data="buy_3days"))
-        markup.add(InlineKeyboardButton("XSCILENT 7 DAYS - ₹300", callback_data="buy_7days"))
-        markup.add(InlineKeyboardButton("XSCILENT 30 DAYS - ₹800", callback_data="buy_30days"))
-        markup.add(InlineKeyboardButton("XSCILENT FULL SEASON - ₹1200", callback_data="buy_season"))
-        markup.add(InlineKeyboardButton("⬅️ Back", callback_data="shop_menu"))
-        bot.edit_message_text(
-            "🛒 **Select your plan:**",
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            reply_markup=markup,
-            parse_mode="Markdown"
-        )
-        
-    elif data.startswith("buy_"):
-        product_map = {
-            "buy_5hours": ("XSCILENT 5 HOURS - ₹40", 40.0),
-            "buy_1day": ("XSCILENT 1 DAY - ₹100", 100.0),
-            "buy_3days": ("XSCILENT 3 DAYS - ₹180", 180.0),
-            "buy_7days": ("XSCILENT 7 DAYS - ₹300", 300.0),
-            "buy_30days": ("XSCILENT 30 DAYS - ₹800", 800.0),
-            "buy_season": ("XSCILENT FULL SEASON - ₹1200", 1200.0)
-        }
-        
-        product_name, price = product_map.get(data, ("XSCILENT 5 HOURS - ₹40", 40.0))
+    product_map = {
+        "XSCILENT 5 HOURS - ₹40": 40.0,
+        "XSCILENT 1 DAY - ₹100": 100.0,
+        "XSCILENT 3 DAYS - ₹180": 180.0,
+        "XSCILENT 7 DAYS - ₹300": 300.0,
+        "XSCILENT 30 DAYS - ₹800": 800.0,
+        "XSCILENT FULL SEASON - ₹1200": 1200.0
+    }
+    
+    if text in product_map:
+        price = product_map[text]
         order_id = str(int(time.time()))
         
         active_checkout_sessions[order_id] = {
             "userId": chat_id,
-            "product": product_name,
+            "product": text,
             "price": price,
             "timestamp": time.time()
         }
         
         qr_text = (
             f"💳 **Checkout Session Created!**\n\n"
-            f"📦 Product: `{product_name}`\n"
+            f"📦 Product: `{text}`\n"
             f"💰 Amount: **₹{price}**\n\n"
             f"👉 Please pay **₹{price}** via UPI to your designated merchant/number.\n"
             f"⚡ Once paid, your notification forwarder will instantly verify the payment and your key will be delivered here automatically!"
         )
-        bot.edit_message_text(
-            qr_text,
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, qr_text, parse_mode="Markdown")
+    else:
+        bot.send_message(chat_id, "Please select a valid plan using the buttons below, or type /start.")
 
 # --- FLASK WEB SERVER & WEBHOOK ROUTE ---
 @app.route('/')
