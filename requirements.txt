@@ -3,3 +3,5 @@ flask
 requests
 python-dotenv
 qrcode[pil]
+pillow
+twilio
