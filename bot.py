@@ -18,10 +18,9 @@ RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
 UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") 
 UPI_NAME = os.getenv("UPI_NAME", "Xscilent")  
 SUPPORT_CHAT_ID = "-5409271468"
-OBB_GROUP_LINK = "https://t.me/c/5409271468/1"
 
-BGMI_APK_LINK = "https://github.com/chsandeep829-bot/Xscilent/releases/download/v1.0.0/bgmi.apk"
-LOADER_APK_LINK = "https://github.com/chsandeep829-bot/Xscilent/releases/download/v1.0.0/loader.apk"
+# GitHub Release download link for Loader APK
+LOADER_APK_LINK = os.getenv("LOADER_APK_LINK", "https://github.com/chsandeep829-bot/Xscilent/releases/download/v1.0.0/loader.apk")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -33,26 +32,23 @@ user_purchased_keys = {}
 # --- GITHUB HELPERS FOR KEYS ---
 def get_file_path_for_product(product_code):
     mapping = {
+        "buy_loader_1hour": "loader/keys_1h.txt",
         "buy_loader_5hours": "loader/keys_5h.txt",
         "buy_loader_1day": "loader/keys_1d.txt",
         "buy_loader_3days": "loader/keys_3d.txt",
         "buy_loader_7days": "loader/keys_7d.txt",
+        "buy_loader_15days": "loader/keys_15d.txt",
         "buy_loader_30days": "loader/keys_30d.txt",
-        "buy_loader_season": "loader/keys_season.txt",
-        
-        "buy_bgmi_5hours": "bgmi/keys_5h.txt",
-        "buy_bgmi_1day": "bgmi/keys_1d.txt",
-        "buy_bgmi_3days": "bgmi/keys_3d.txt",
-        "buy_bgmi_7days": "bgmi/keys_7d.txt",
-        "buy_bgmi_30days": "bgmi/keys_30d.txt",
-        "buy_bgmi_season": "bgmi/keys_season.txt"
+        "buy_loader_60days": "loader/keys_60d.txt"
     }
     return mapping.get(product_code)
 
 def get_product_details(product_code):
-    cat_prefix = "Xscilent Loader" if "loader" in product_code else "Xscilent Mod BGMI"
+    cat_prefix = "Xscilent Loader"
     
-    if "5hours" in product_code:
+    if "1hour" in product_code:
+        return (f"{cat_prefix} - 1 HOUR", 20.0)
+    elif "5hours" in product_code:
         return (f"{cat_prefix} - 5 HOURS", 40.0)
     elif "1day" in product_code:
         return (f"{cat_prefix} - 1 DAY", 100.0)
@@ -60,10 +56,12 @@ def get_product_details(product_code):
         return (f"{cat_prefix} - 3 DAYS", 180.0)
     elif "7days" in product_code:
         return (f"{cat_prefix} - 7 DAYS", 300.0)
+    elif "15days" in product_code:
+        return (f"{cat_prefix} - 15 DAYS", 500.0)
     elif "30days" in product_code:
         return (f"{cat_prefix} - 30 DAYS", 800.0)
-    elif "season" in product_code:
-        return (f"{cat_prefix} - FULL SEASON", 1200.0)
+    elif "60days" in product_code:
+        return (f"{cat_prefix} - 60 DAYS", 1200.0)
     return ("Unknown Product", 0.0)
 
 def fetch_keys_from_github(file_path):
@@ -115,25 +113,18 @@ def get_persistent_keyboard():
     )
     return markup
 
-def get_products_category_menu():
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        InlineKeyboardButton("🚀 Megha Bhai Loader", callback_data="cat_loader"),
-        InlineKeyboardButton("🎮 Megha Bhai Mod BGMI", callback_data="cat_bgmi")
-    )
-    return markup
-
-def get_duration_menu(category):
+def get_duration_menu():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("5 Hours - ₹40", callback_data=f"buy_{category}_5hours"),
-        InlineKeyboardButton("1 Day - ₹100", callback_data=f"buy_{category}_1day"),
-        InlineKeyboardButton("3 Days - ₹180", callback_data=f"buy_{category}_3days"),
-        InlineKeyboardButton("7 Days - ₹300", callback_data=f"buy_{category}_7days"),
-        InlineKeyboardButton("30 Days - ₹800", callback_data=f"buy_{category}_30days"),
-        InlineKeyboardButton("Full Season - ₹1200", callback_data=f"buy_{category}_season")
+        InlineKeyboardButton("1 Hour - ₹20", callback_data="buy_loader_1hour"),
+        InlineKeyboardButton("5 Hours - ₹40", callback_data="buy_loader_5hours"),
+        InlineKeyboardButton("1 Day - ₹100", callback_data="buy_loader_1day"),
+        InlineKeyboardButton("3 Days - ₹180", callback_data="buy_loader_3days"),
+        InlineKeyboardButton("7 Days - ₹300", callback_data="buy_loader_7days"),
+        InlineKeyboardButton("15 Days - ₹500", callback_data="buy_loader_15days"),
+        InlineKeyboardButton("30 Days - ₹800", callback_data="buy_loader_30days"),
+        InlineKeyboardButton("60 Days - ₹1200", callback_data="buy_loader_60days")
     )
-    markup.add(InlineKeyboardButton("⬅️ Back to Categories", callback_data="back_to_categories"))
     return markup
 
 # --- TELEGRAM HANDLERS ---
@@ -150,8 +141,8 @@ def send_welcome(message):
 def handle_purchase_text(message):
     bot.send_message(
         message.chat.id,
-        "📦 **Select a product category:**",
-        reply_markup=get_products_category_menu(),
+        "🚀 **Select a plan for Xscilent Loader:**",
+        reply_markup=get_duration_menu(),
         parse_mode="Markdown"
     )
 
@@ -173,7 +164,7 @@ def handle_check_fund_text(message):
 def handle_how_to_buy_text(message):
     bot.send_message(
         message.chat.id,
-        "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your product & duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key and app files will be delivered instantly upon payment verification!",
+        "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key and loader download link will be delivered instantly upon payment verification!",
         parse_mode="Markdown"
     )
 
@@ -196,37 +187,7 @@ def handle_callback(call):
     chat_id = call.message.chat.id
     data = call.data
 
-    if data == "cat_loader":
-        bot.edit_message_text(
-            "🚀 **Select a plan for Xscilent Loader:**",
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            reply_markup=get_duration_menu("loader"),
-            parse_mode="Markdown"
-        )
-        return
-
-    elif data == "cat_bgmi":
-        bot.edit_message_text(
-            "🎮 **Select a plan for Xscilent Mod BGMI:**",
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            reply_markup=get_duration_menu("bgmi"),
-            parse_mode="Markdown"
-        )
-        return
-
-    elif data == "back_to_categories":
-        bot.edit_message_text(
-            "📦 **Select a product category:**",
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            reply_markup=get_products_category_menu(),
-            parse_mode="Markdown"
-        )
-        return
-
-    elif data.startswith("buy_"):
+    if data.startswith("buy_"):
         product_name, price = get_product_details(data)
         file_path = get_file_path_for_product(data)
         
@@ -270,7 +231,7 @@ def handle_callback(call):
                     f"📦 Product: `{product_name}`\n"
                     f"💰 Amount: **₹{price}**\n\n"
                     f"📱 **Scan the QR code above** using GPay, PhonePe, or Paytm to pay instantly.\n\n"
-                    f"⚡ Once paid, MacroDroid will instantly notify this bot and your key & files will be delivered automatically!",
+                    f"⚡ Once paid, MacroDroid will instantly notify this bot and your key & download link will be delivered automatically!",
             parse_mode="Markdown"
         )
         
@@ -286,7 +247,7 @@ def handle_callback(call):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Xscilent Bot is running successfully!"
+    return "Xscilent Loader Bot is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -354,32 +315,22 @@ def macro_webhook():
                                 parse_mode="Markdown"
                             )
                             
-                            # Deliver Files / Group Link based on product type
-                            is_loader = "loader" in product_code
+                            # Deliver Download Link via Inline Button
                             try:
-                                if is_loader:
-                                    bot.send_document(user_id, document=LOADER_APK_LINK, caption="📥 Here is your Xscilent Loader APK file!")
-                                else:
-                                    # Send BGMI APK from release link
-                                    bot.send_document(user_id, document=BGMI_APK_LINK, caption="📥 Here is your Xscilent Mod BGMI APK file!")
-                                    
-                                    # Send OBB Group Link Button using your group ID
-                                    obb_markup = InlineKeyboardMarkup()
-                                    obb_markup.add(InlineKeyboardButton("📥 Download OBB File in Group", url=OBB_GROUP_LINK))
-                                    
-                                    bot.send_message(
-                                        user_id,
-                                        "📦 **BGMI OBB File Download:**\n\n"
-                                        "Due to its large size (1.24 GB), the OBB file (`main.21325.com.pubg.imobile.obb`) is available in our official download group.\n\n"
-                                        "👉 Click the button below to join the group and download the OBB file:",
-                                        reply_markup=obb_markup,
-                                        parse_mode="Markdown"
-                                    )
-                            except Exception as doc_err:
-                                print("Error sending document/message:", doc_err)
+                                link_markup = InlineKeyboardMarkup()
+                                link_markup.add(InlineKeyboardButton("📥 Download Xscilent Loader APK", url=LOADER_APK_LINK))
+                                bot.send_message(
+                                    user_id,
+                                    "🚀 **Loader App Download:**\n\n"
+                                    "Click the button below to download your loader application:",
+                                    reply_markup=link_markup,
+                                    parse_mode="Markdown"
+                                )
+                            except Exception as msg_err:
+                                print("Error sending download link messages:", msg_err)
 
                             del active_checkout_sessions[matched_order_id]
-                            return jsonify({"status": "success", "message": "Key and files delivered"}), 200
+                            return jsonify({"status": "success", "message": "Key and link delivered"}), 200
                     else:
                         bot.send_message(
                             user_id,
@@ -394,8 +345,8 @@ def macro_webhook():
 
 if __name__ == '__main__':
     try:
-        bot.set_my_short_description("Get instant keys & files for Xscilent Loader & BGMI Mod!")
-        bot.set_my_description("Welcome to Xscilent Bot! Purchase instant keys and download files securely.")
+        bot.set_my_short_description("Get instant keys & files for Xscilent Loader!")
+        bot.set_my_description("Welcome to Xscilent Bot! Purchase instant keys and download the loader securely.")
     except Exception as e:
         print("Could not update bot descriptions:", e)
 
