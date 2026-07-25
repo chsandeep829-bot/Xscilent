@@ -2,6 +2,8 @@ import os
 import re
 import time
 import base64
+import io
+import qrcode
 import requests
 from flask import Flask, request
 import telebot
@@ -13,7 +15,9 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       # Your GitHub Personal Access Tok
 GITHUB_REPO = os.getenv("GITHUB_REPO")         # e.g., "username/repo-name"
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
-SMS_CHAT_ID = os.getenv("SMS_CHAT_ID")         # Optional: Restrict SMS parsing to this specific Chat ID
+SMS_CHAT_ID = os.getenv("SMS_CHAT_ID")         # Restrict SMS parsing to this specific Chat ID
+UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") # Your UPI ID from Render environment
+UPI_NAME = os.getenv("UPI_NAME", "Xscilent")   # Display name on UPI apps
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -112,13 +116,28 @@ def handle_incoming_message(message):
             "timestamp": time.time()
         }
         
-        bot.send_message(
+        # Construct UPI Payment Link
+        upi_url = f"upi://pay?pa={UPI_VPA}&pn={UPI_NAME}&am={price}&cu=INR"
+        
+        # Generate QR Code image in memory
+        qr = qrcode.QRCode(version=1, box_size=10, border=4)
+        qr.add_data(upi_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        bio = io.BytesIO()
+        bio.name = 'upi_qr.png'
+        img.save(bio, 'PNG')
+        bio.seek(0)
+        
+        bot.send_photo(
             chat_id,
-            f"💳 **Checkout Session Created!**\n\n"
-            f"📦 Product: `{text}`\n"
-            f"💰 Amount: **₹{price}**\n\n"
-            f"👉 Please pay **₹{price}** via UPI.\n"
-            f"⚡ Once paid, your SMS forwarder app will send the notification here, and your key will be delivered instantly!",
+            photo=bio,
+            caption=f"💳 **Checkout Session Created!**\n\n"
+                    f"📦 Product: `{text}`\n"
+                    f"💰 Amount: **₹{price}**\n\n"
+                    f"📱 **Scan the QR code above** using GPay, PhonePe, or Paytm to pay instantly.\n\n"
+                    f"⚡ Once paid, your SMS forwarder app will notify this bot and your key will be delivered automatically!",
             parse_mode="Markdown"
         )
         return
@@ -169,7 +188,7 @@ def handle_incoming_message(message):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Telegram UPI Bot (SMS Forwarder Mode) is running successfully!"
+    return "Telegram UPI Bot (QR Code Mode) is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
