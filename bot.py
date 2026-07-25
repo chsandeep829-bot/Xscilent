@@ -2,6 +2,7 @@ import os
 import re
 import time
 import base64
+import threading
 import requests
 from flask import Flask, request, jsonify
 import telebot
@@ -17,16 +18,18 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # In-memory storage for active checkout sessions and purchased keys
-active_checkout_sessions = {}  # { order_id: {"userId": user_id, "product": name, "price": 40.0, "timestamp": time.time()} }
+active_checkout_sessions = {}  
 user_purchased_keys = {}
 
 # --- GITHUB KEY MANAGEMENT HELPERS ---
 def get_file_path_for_product(product_name):
-    # Map products to their corresponding text file paths in your GitHub repo
     mapping = {
         "XSCILENT 5 HOURS - ₹40": "keys/5hours.txt",
         "XSCILENT 1 DAY - ₹100": "keys/1day.txt",
-        "XSCILENT 7 DAYS - ₹300": "keys/7days.txt"
+        "XSCILENT 3 DAYS - ₹180": "keys/3days.txt",
+        "XSCILENT 7 DAYS - ₹300": "keys/7days.txt",
+        "XSCILENT 30 DAYS - ₹800": "keys/30days.txt",
+        "XSCILENT FULL SEASON - ₹1200": "keys/fullseason.txt"
     }
     return mapping.get(product_name)
 
@@ -79,8 +82,9 @@ def send_welcome(message):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     chat_id = call.message.chat.id
+    data = call.data
     
-    if call.data == "shop_menu":
+    if data == "shop_menu":
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📦 XSCILENT LOADER", callback_data="loader_menu"))
         bot.edit_message_text(
@@ -91,9 +95,14 @@ def handle_query(call):
             parse_mode="Markdown"
         )
         
-    elif call.data == "loader_menu":
+    elif data == "loader_menu":
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("XSCILENT 5 HOURS - ₹40", callback_data="buy_5hours"))
+        markup.add(InlineKeyboardButton("XSCILENT 1 DAY - ₹100", callback_data="buy_1day"))
+        markup.add(InlineKeyboardButton("XSCILENT 3 DAYS - ₹180", callback_data="buy_3days"))
+        markup.add(InlineKeyboardButton("XSCILENT 7 DAYS - ₹300", callback_data="buy_7days"))
+        markup.add(InlineKeyboardButton("XSCILENT 30 DAYS - ₹800", callback_data="buy_30days"))
+        markup.add(InlineKeyboardButton("XSCILENT FULL SEASON - ₹1200", callback_data="buy_season"))
         markup.add(InlineKeyboardButton("⬅️ Back", callback_data="shop_menu"))
         bot.edit_message_text(
             "🛒 **Select your plan:**",
@@ -103,21 +112,32 @@ def handle_query(call):
             parse_mode="Markdown"
         )
         
-    elif call.data == "buy_5hours":
+    elif data.startswith("buy_"):
+        product_map = {
+            "buy_5hours": ("XSCILENT 5 HOURS - ₹40", 40.0),
+            "buy_1day": ("XSCILENT 1 DAY - ₹100", 100.0),
+            "buy_3days": ("XSCILENT 3 DAYS - ₹180", 180.0),
+            "buy_7days": ("XSCILENT 7 DAYS - ₹300", 300.0),
+            "buy_30days": ("XSCILENT 30 DAYS - ₹800", 800.0),
+            "buy_season": ("XSCILENT FULL SEASON - ₹1200", 1200.0)
+        }
+        
+        product_name, price = product_map.get(data, ("XSCILENT 5 HOURS - ₹40", 40.0))
         order_id = str(int(time.time()))
+        
         active_checkout_sessions[order_id] = {
             "userId": chat_id,
-            "product": "XSCILENT 5 HOURS - ₹40",
-            "price": 40.0,
+            "product": product_name,
+            "price": price,
             "timestamp": time.time()
         }
         
         qr_text = (
-            "💳 **Checkout Session Created!**\n\n"
-            "📦 Product: `XSCILENT 5 HOURS - ₹40`\n"
-            "💰 Amount: **₹40.00**\n\n"
-            "👉 Please pay **₹40.00** via UPI to your designated merchant/number.\n"
-            "⚡ Once paid, your notification forwarder will instantly verify the payment and your key will be delivered here automatically!"
+            f"💳 **Checkout Session Created!**\n\n"
+            f"📦 Product: `{product_name}`\n"
+            f"💰 Amount: **₹{price}**\n\n"
+            f"👉 Please pay **₹{price}** via UPI to your designated merchant/number.\n"
+            f"⚡ Once paid, your notification forwarder will instantly verify the payment and your key will be delivered here automatically!"
         )
         bot.edit_message_text(
             qr_text,
@@ -167,7 +187,6 @@ def webhook():
         session = active_checkout_sessions.get(matched_order_id)
         if not session:
             print("⚠️ Active session not found. Active sessions:", active_checkout_sessions)
-            # Return 200 OK so the forwarder app marks it as SUCCESS instead of FAIL
             return jsonify({"status": "ignored", "message": "Matching active order session not found"}), 200
 
         user_id = session["userId"]
@@ -210,6 +229,20 @@ def webhook():
         print("Webhook processing error:", error)
         return jsonify({"error": "Internal server error"}), 200
 
+# --- RUN BOT & WEB SERVER CONCURRENTLY ---
+def run_telegram_bot():
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"Telegram polling error: {e}")
+            time.sleep(5)
+
 if __name__ == '__main__':
-    # Run Flask server on Render's required host and port
+    # Start Telegram Bot Polling in a background thread
+    bot_thread = threading.Thread(target=run_telegram_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # Run Flask Web Server on Render's required host and port
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
