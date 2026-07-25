@@ -9,13 +9,6 @@ from flask import Flask, request, jsonify
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
-# Safe import for Twilio
-try:
-    from twilio.rest import Client
-    TWILIO_AVAILABLE = True
-except ImportError:
-    TWILIO_AVAILABLE = False
-
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       
@@ -25,13 +18,7 @@ RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
 UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") 
 UPI_NAME = os.getenv("UPI_NAME", "Xscilent")  
 SUPPORT_CHAT_ID = "-5409271468"
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
-
-# Twilio Configuration for Owner SMS & Call Alerts (+91 9494524588)
-TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
-TWILIO_FROM = os.getenv("TWILIO_PHONE_NUMBER", "")
-OWNER_PHONE = "+919494524588"
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # Set your Telegram User ID here or via env variable
 
 # Raw GitHub URL for loader.apk from main branch
 LOADER_APK_LINK = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/loader.apk"
@@ -42,53 +29,11 @@ app = Flask(__name__)
 # In-memory storage & tracking
 active_checkout_sessions = {}  
 user_purchased_keys = {}  
-user_key_downloads = {}  
+user_key_downloads = {}  # Tracks remaining downloads per (user_id, key) -> Default 2
 
 # Admin financial & buyer records
 total_collection = 0.0
-buyer_records = []  
-
-# --- ALERT HELPER FOR OUT OF STOCK ---
-def alert_owner_out_of_stock(product_name):
-    # 1. Send Telegram message to Admin
-    if ADMIN_USER_ID != 0:
-        try:
-            bot.send_message(
-                ADMIN_USER_ID,
-                f"🚨 **URGENT: Out of Stock Alert!**\n\n"
-                f"Product **{product_name}** has run out of keys! Please refill keys immediately.",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            print("Error sending admin telegram alert:", e)
-
-    # 2. Send SMS and Make Call via Twilio with detailed debugging logs
-    print(f"DEBUG: TWILIO_AVAILABLE={TWILIO_AVAILABLE}, SID_PRESENT={bool(TWILIO_SID)}, TOKEN_PRESENT={bool(TWILIO_TOKEN)}, FROM_PRESENT={bool(TWILIO_FROM)}")
-    
-    if TWILIO_AVAILABLE and TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM:
-        try:
-            client = Client(TWILIO_SID, TWILIO_TOKEN)
-            
-            # Send SMS
-            sms_msg = client.messages.create(
-                body=f"ALERT: Xscilent Loader product {product_name} is OUT OF STOCK! Please refill keys immediately.",
-                from_=TWILIO_FROM,
-                to=OWNER_PHONE
-            )
-            print(f"📱 Twilio SMS SID: {sms_msg.sid}")
-            
-            # Make Voice Call
-            call_obj = client.calls.create(
-                twiml=f'<Response><Say>Alert! Xscilent Loader product {product_name} is out of stock. Please refill keys immediately.</Say></Response>',
-                from_=TWILIO_FROM,
-                to=OWNER_PHONE
-            )
-            print(f"📞 Twilio Call SID: {call_obj.sid}")
-            
-        except Exception as e:
-            print(f"❌ Twilio API Error: {str(e)}")
-    else:
-        print("⚠️ Twilio package or credentials missing/incomplete. Check Render Environment variables.")
+buyer_records = []  # List of dicts storing buyer details
 
 # --- GITHUB HELPERS FOR KEYS ---
 def get_file_path_for_product(product_code):
@@ -106,6 +51,7 @@ def get_file_path_for_product(product_code):
 
 def get_product_details(product_code):
     cat_prefix = "Xscilent Loader"
+    
     if "1hour" in product_code:
         return (f"{cat_prefix} - 1 HOUR", 20.0)
     elif "5hours" in product_code:
@@ -225,6 +171,7 @@ def admin_stats(message):
         f"📜 **Buyer Details:**\n{buyers_summary}"
     )
     
+    # Split message if too long for Telegram
     if len(stats_text) > 4000:
         for x in range(0, len(stats_text), 4000):
             bot.send_message(message.chat.id, stats_text[x:x+4000], parse_mode="Markdown")
@@ -316,6 +263,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "❌ Download limit reached (0/2) for this key!", show_alert=True)
             return
             
+        # Decrement download count
         user_key_downloads[(user_id, key_str)] = rem - 1
         new_rem = rem - 1
         
@@ -342,8 +290,6 @@ def handle_callback(call):
         if file_path:
             keys, _ = fetch_keys_from_github(file_path)
             if not keys:
-                alert_owner_out_of_stock(product_name)
-                
                 bot.answer_callback_query(call.id, "❌ Out of Stock!", show_alert=True)
                 try:
                     bot.delete_message(chat_id, call.message.message_id)
@@ -351,7 +297,7 @@ def handle_callback(call):
                     pass
                 bot.send_message(
                     chat_id,
-                    f"❌ **Out of Stock!**\n\nSorry, **{product_name}** is currently out of stock on GitHub. The owner has been immediately notified. Please check back later!",
+                    f"❌ **Out of Stock!**\n\nSorry, **{product_name}** is currently out of stock on GitHub. No QR code has been generated. Please check back later!",
                     parse_mode="Markdown"
                 )
                 return
@@ -456,8 +402,10 @@ def macro_webhook():
                                 user_purchased_keys[user_id] = []
                             user_purchased_keys[user_id].append(delivered_key)
                             
+                            # Initialize download limit to 2 for this key
                             user_key_downloads[(user_id, delivered_key)] = 2
 
+                            # Update Total Collection & Buyer Records
                             total_collection += price
                             
                             username_str = f"ID:{user_id}"
@@ -482,6 +430,7 @@ def macro_webhook():
                             except Exception as del_err:
                                 print("Could not delete QR message:", del_err)
                             
+                            # Send Key First
                             bot.send_message(
                                 user_id,
                                 f"✅ **Payment Verified & Key Delivered!**\n\n"
@@ -491,6 +440,7 @@ def macro_webhook():
                                 parse_mode="Markdown"
                             )
                             
+                            # Deliver Download Link via Interactive Button with Limit tracking
                             try:
                                 link_markup = InlineKeyboardMarkup()
                                 link_markup.add(InlineKeyboardButton("📥 Download Xscilent Loader APK (2/2 left)", callback_data=f"dl_key_{delivered_key}"))
@@ -507,10 +457,9 @@ def macro_webhook():
                             del active_checkout_sessions[matched_order_id]
                             return jsonify({"status": "success", "message": "Key and link delivered"}), 200
                     else:
-                        alert_owner_out_of_stock(product_name)
                         bot.send_message(
                             user_id,
-                            f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub! The owner has been alerted.",
+                            f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub!",
                             parse_mode="Markdown"
                         )
                         
