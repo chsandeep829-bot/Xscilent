@@ -15,12 +15,12 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "chsandeep829-bot/Xscilent")         
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
-UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") 
-UPI_NAME = os.getenv("UPI_NAME", "Xscilent")  
+UPI_VPA = os.getenv("UPI_VPA", "c.sandeep@superyes") 
+UPI_NAME = os.getenv("UPI_NAME", "My Business")  
 SUPPORT_CHAT_ID = "-5409271468"
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "8819634341"))
 
-# MacroDroid Webhook URL for loud phone alarm/voice alerts
+# MacroDroid Webhook URL for out-of-stock phone alarm alerts
 MACRODROID_URL = os.getenv("MACRODROID_WEBHOOK_URL", "")
 
 # Raw GitHub URL for loader.apk from main branch
@@ -391,19 +391,24 @@ def telegram_webhook():
 def macro_webhook():
     global total_collection
     try:
-        body = {}
-        if request.is_json:
-            body = request.get_json(silent=True) or {}
-        elif request.form:
-            body = request.form.to_dict()
+        text = ""
+        if request.args.get('text'):
+            text = request.args.get('text')
+        elif request.is_json:
+            json_data = request.get_json(silent=True) or {}
+            text = str(json_data.get('text', ''))
+        elif request.form.get('text'):
+            text = request.form.get('text')
+        
+        if not text:
+            text = request.data.decode('utf-8', errors='ignore')
 
-        text = str(body.get('text', '')) or request.data.decode('utf-8', errors='ignore')
-        print("📥 MacroDroid Webhook Payload Received:", text)
+        print(f"📥 MacroDroid Webhook Payload Received: {text}", flush=True)
 
         amount_match = re.search(r'(?:₹|Rs\.?)\s*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
         if amount_match:
             received_amount = float(amount_match.group(1))
-            print(f"🔍 Detected amount from MacroDroid webhook: ₹{received_amount}")
+            print(f"🔍 Detected amount from MacroDroid webhook: ₹{received_amount}", flush=True)
             
             matched_order_id = None
             latest_time = 0
@@ -432,7 +437,6 @@ def macro_webhook():
                             user_purchased_keys[user_id].append(delivered_key)
                             
                             user_key_downloads[(user_id, delivered_key)] = 2
-
                             total_collection += price
                             
                             username_str = f"ID:{user_id}"
@@ -485,13 +489,13 @@ def macro_webhook():
                         alert_owner_out_of_stock(product_name)
                         bot.send_message(
                             user_id,
-                            f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub! The owner has been alerted with an alarm.",
+                            f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub! The owner has been alerted.",
                             parse_mode="Markdown"
                         )
                         
         return jsonify({"status": "received"}), 200
     except Exception as error:
-        print("Webhook error:", error)
+        print("Webhook error:", error, flush=True)
         return jsonify({"error": str(error)}), 200
 
 if __name__ == '__main__':
