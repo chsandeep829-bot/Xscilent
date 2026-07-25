@@ -9,19 +9,29 @@ from flask import Flask, request, jsonify
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
+# Safe import for Twilio
+try:
+    from twilio.rest import Client
+    TWILIO_AVAILABLE = True
+except ImportError:
+    TWILIO_AVAILABLE = False
+
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       
 GITHUB_REPO = os.getenv("GITHUB_REPO", "chsandeep829-bot/Xscilent")         
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
-UPI_VPA = os.getenv("UPI_VPA", "c.sandeep@superyes") 
-UPI_NAME = os.getenv("UPI_NAME", "My Business")  
+UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") 
+UPI_NAME = os.getenv("UPI_NAME", "Xscilent")  
 SUPPORT_CHAT_ID = "-5409271468"
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "8819634341"))
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 
-# MacroDroid Webhook URL for out-of-stock phone alarm alerts
-MACRODROID_URL = os.getenv("MACRODROID_WEBHOOK_URL", "")
+# Twilio Configuration for Owner SMS & Call Alerts (+91 9494524588)
+TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM = os.getenv("TWILIO_PHONE_NUMBER", "")
+OWNER_PHONE = "+919494524588"
 
 # Raw GitHub URL for loader.apk from main branch
 LOADER_APK_LINK = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/loader.apk"
@@ -52,18 +62,33 @@ def alert_owner_out_of_stock(product_name):
         except Exception as e:
             print("Error sending admin telegram alert:", e)
 
-    # 2. Trigger MacroDroid Webhook to play alarm/voice alert locally on your phone
-    if MACRODROID_URL:
+    # 2. Send SMS and Make Call via Twilio with detailed debugging logs
+    print(f"DEBUG: TWILIO_AVAILABLE={TWILIO_AVAILABLE}, SID_PRESENT={bool(TWILIO_SID)}, TOKEN_PRESENT={bool(TWILIO_TOKEN)}, FROM_PRESENT={bool(TWILIO_FROM)}")
+    
+    if TWILIO_AVAILABLE and TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM:
         try:
-            response = requests.post(
-                MACRODROID_URL, 
-                json={"product": product_name, "status": "out_of_stock"}
+            client = Client(TWILIO_SID, TWILIO_TOKEN)
+            
+            # Send SMS
+            sms_msg = client.messages.create(
+                body=f"ALERT: Xscilent Loader product {product_name} is OUT OF STOCK! Please refill keys immediately.",
+                from_=TWILIO_FROM,
+                to=OWNER_PHONE
             )
-            print(f"📱 MacroDroid Webhook Triggered Successfully: HTTP {response.status_code}")
+            print(f"📱 Twilio SMS SID: {sms_msg.sid}")
+            
+            # Make Voice Call
+            call_obj = client.calls.create(
+                twiml=f'<Response><Say>Alert! Xscilent Loader product {product_name} is out of stock. Please refill keys immediately.</Say></Response>',
+                from_=TWILIO_FROM,
+                to=OWNER_PHONE
+            )
+            print(f"📞 Twilio Call SID: {call_obj.sid}")
+            
         except Exception as e:
-            print(f"❌ MacroDroid Webhook Error: {str(e)}")
+            print(f"❌ Twilio API Error: {str(e)}")
     else:
-        print("⚠️ MACRODROID_WEBHOOK_URL environment variable is missing.")
+        print("⚠️ Twilio package or credentials missing/incomplete. Check Render Environment variables.")
 
 # --- GITHUB HELPERS FOR KEYS ---
 def get_file_path_for_product(product_code):
@@ -326,7 +351,7 @@ def handle_callback(call):
                     pass
                 bot.send_message(
                     chat_id,
-                    f"❌ **Out of Stock!**\n\nSorry, **{product_name}** is currently out of stock on GitHub. The owner has been alerted with an alarm. Please check back later!",
+                    f"❌ **Out of Stock!**\n\nSorry, **{product_name}** is currently out of stock on GitHub. The owner has been immediately notified. Please check back later!",
                     parse_mode="Markdown"
                 )
                 return
@@ -391,24 +416,19 @@ def telegram_webhook():
 def macro_webhook():
     global total_collection
     try:
-        text = ""
-        if request.args.get('text'):
-            text = request.args.get('text')
-        elif request.is_json:
-            json_data = request.get_json(silent=True) or {}
-            text = str(json_data.get('text', ''))
-        elif request.form.get('text'):
-            text = request.form.get('text')
-        
-        if not text:
-            text = request.data.decode('utf-8', errors='ignore')
+        body = {}
+        if request.is_json:
+            body = request.get_json(silent=True) or {}
+        elif request.form:
+            body = request.form.to_dict()
 
-        print(f"📥 MacroDroid Webhook Payload Received: {text}", flush=True)
+        text = str(body.get('text', '')) or request.data.decode('utf-8', errors='ignore')
+        print("📥 MacroDroid Webhook Payload Received:", text)
 
         amount_match = re.search(r'(?:₹|Rs\.?)\s*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
         if amount_match:
             received_amount = float(amount_match.group(1))
-            print(f"🔍 Detected amount from MacroDroid webhook: ₹{received_amount}", flush=True)
+            print(f"🔍 Detected amount from MacroDroid webhook: ₹{received_amount}")
             
             matched_order_id = None
             latest_time = 0
@@ -437,6 +457,7 @@ def macro_webhook():
                             user_purchased_keys[user_id].append(delivered_key)
                             
                             user_key_downloads[(user_id, delivered_key)] = 2
+
                             total_collection += price
                             
                             username_str = f"ID:{user_id}"
@@ -495,7 +516,7 @@ def macro_webhook():
                         
         return jsonify({"status": "received"}), 200
     except Exception as error:
-        print("Webhook error:", error, flush=True)
+        print("Webhook error:", error)
         return jsonify({"error": str(error)}), 200
 
 if __name__ == '__main__':
