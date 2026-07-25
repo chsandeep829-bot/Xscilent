@@ -1,224 +1,139 @@
 import os
-import base64
-import time
 import re
-import threading
+import time
+import base64
 import requests
 from flask import Flask, request, jsonify
-from dotenv import load_dotenv
 import telebot
-from telebot import types
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-load_dotenv()
-
+# --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPO")
-UPI_VPA = os.getenv("UPI_VPA", "c.sandeep@superyes")
-UPI_NAME = os.getenv("UPI_NAME", "My Business")
-
-if not TOKEN:
-    print("❌ TELEGRAM_BOT_TOKEN is missing in environment variables.")
-    exit(1)
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       # Your GitHub Personal Access Token
+GITHUB_REPO = os.getenv("GITHUB_REPO")         # e.g., "username/repo-name"
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-active_checkout_sessions = {}
+# In-memory storage for active checkout sessions and purchased keys
+active_checkout_sessions = {}  # { order_id: {"userId": user_id, "product": name, "price": 40.0, "timestamp": time.time()} }
 user_purchased_keys = {}
 
+# --- GITHUB KEY MANAGEMENT HELPERS ---
 def get_file_path_for_product(product_name):
-    name = product_name.upper()
-    if "5 HOURS" in name: return "keys_5h.txt"
-    if "1 DAY" in name: return "keys_1d.txt"
-    if "3 DAYS" in name: return "keys_3d.txt"
-    if "7 DAYS" in name: return "keys_7d.txt"
-    if "30 DAYS" in name: return "keys_30d.txt"
-    if "FULL SEASON" in name: return "keys_season.txt"
-    return None
+    # Map products to their corresponding text file paths in your GitHub repo
+    mapping = {
+        "XSCILENT 5 HOURS - ₹40": "keys/5hours.txt",
+        "XSCILENT 1 DAY - ₹100": "keys/1day.txt",
+        "XSCILENT 7 DAYS - ₹300": "keys/7days.txt"
+    }
+    return mapping.get(product_name)
 
 def fetch_keys_from_github(file_path):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json"
-    }
-    try:
-        res = requests.get(url, headers=headers)
-        if res.status_code == 200:
-            data = res.json()
-            content = base64.b64decode(data["content"]).decode("utf-8")
-            keys = [line.strip() for line in content.split("\n") if line.strip()]
-            return keys, data["sha"]
-    except Exception as error:
-        print(f"Error fetching keys from GitHub ({file_path}):", error)
+    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        content_data = response.json()
+        file_content = base64.b64decode(content_data["content"]).decode("utf-8")
+        sha = content_data["sha"]
+        keys = [line.strip() for line in file_content.splitlines() if line.strip()]
+        return keys, sha
     return [], None
 
 def remove_key_from_github(file_path, key_to_remove):
     keys, sha = fetch_keys_from_github(file_path)
     if not sha or key_to_remove not in keys:
         return False
+        
     keys.remove(key_to_remove)
     updated_content = "\n".join(keys) + ("\n" if keys else "")
     encoded_content = base64.b64encode(updated_content.encode("utf-8")).decode("utf-8")
     
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-        "Content-Type": "application/json"
-    }
-    body = {
-        "message": f"Auto-remove sold key: {key_to_remove}",
+    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
+    payload = {
+        "message": f"Auto-remove delivered key from {file_path}",
         "content": encoded_content,
-        "sha": sha
+        "sha": sha,
+        "branch": GITHUB_BRANCH
     }
-    try:
-        res = requests.put(url, headers=headers, json=body)
-        if res.status_code in [200, 201]:
-            print(f"Successfully removed key {key_to_remove} from {file_path}")
-            return True
-    except Exception as error:
-        print(f"Error updating GitHub keys file ({file_path}):", error)
-    return False
+    
+    response = requests.put(url, headers=headers, json=payload)
+    return response.status_code in [200, 201]
 
-def get_main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("🔑 Purchase Key", "📋 My Keys")
-    markup.row("🎁 Redeem Code", "📖 How to Buy")
-    markup.row("🆔 My ID", "🆘 Contact Support")
-    return markup
-
-def get_brands_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("XSCILENT LOADER")
-    markup.row("⬅️ Back")
-    return markup
-
-def get_xscilent_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("XSCILENT 5 HOURS - ₹40", "XSCILENT 1 DAY - ₹100")
-    markup.row("XSCILENT 3 DAYS - ₹180", "XSCILENT 7 DAYS - ₹300")
-    markup.row("XSCILENT 30 DAYS - ₹800", "XSCILENT FULL SEASON - ₹1200")
-    markup.row("⬅️ Back to Brands")
-    return markup
-
+# --- TELEGRAM BOT HANDLERS ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "👋 Welcome to Key Store", reply_markup=get_main_menu())
-
-@bot.message_handler(func=lambda msg: msg.text == "🔑 Purchase Key")
-def purchase_key(message):
-    bot.send_message(message.chat.id, "🎮 Select a brand:", reply_markup=get_brands_menu())
-
-@bot.message_handler(func=lambda msg: msg.text == "⬅️ Back to Brands")
-def back_to_brands(message):
-    bot.send_message(message.chat.id, "🎮 Select a brand:", reply_markup=get_brands_menu())
-
-@bot.message_handler(func=lambda msg: msg.text == "⬅️ Back")
-def back_main(message):
-    bot.send_message(message.chat.id, "👋 Main Menu", reply_markup=get_main_menu())
-
-@bot.message_handler(func=lambda msg: msg.text == "XSCILENT LOADER")
-def xscilent_loader(message):
-    bot.send_message(message.chat.id, "⏳ Select duration:", reply_markup=get_xscilent_menu())
-
-@bot.message_handler(func=lambda msg: msg.text == "📋 My Keys")
-def my_keys(message):
-    user_id = message.from_user.id
-    purchased = user_purchased_keys.get(user_id, [])
-    if not purchased:
-        bot.send_message(message.chat.id, "📋 You haven't purchased any keys yet.", reply_markup=get_main_menu())
-    else:
-        msg = "📋 **Your Purchased Keys:**\n\n"
-        for idx, item in enumerate(purchased):
-            msg += f"{idx + 1}. **{item['product']}**\n🔑 Key: `{item['key']}`\n💵 Price: ₹{item['price']}\n\n"
-        bot.send_message(message.chat.id, msg, parse_mode="Markdown", reply_markup=get_main_menu())
-
-@bot.message_handler(func=lambda msg: msg.text == "📖 How to Buy")
-def how_to_buy(message):
-    guide_text = (
-        "📖 **How to Buy License Keys:**\n\n"
-        "1️⃣ Tap **🔑 Purchase Key** from the main menu.\n"
-        "2️⃣ Select your desired loader brand and duration.\n"
-        "3️⃣ Scan the UPI QR code and complete payment.\n"
-        "4️⃣ Your license key will be delivered **instantly and automatically** upon successful payment! 🚀"
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔑 Purchase Key", callback_data="shop_menu"))
+    bot.send_message(
+        message.chat.id,
+        "👋 **Welcome to Xscilent Bot!**\n\nClick below to browse and purchase available keys automatically.",
+        reply_markup=markup,
+        parse_mode="Markdown"
     )
-    bot.send_message(message.chat.id, guide_text, parse_mode="Markdown", reply_markup=get_main_menu())
 
-@bot.message_handler(func=lambda msg: msg.text == "🆘 Contact Support")
-def contact_support(message):
-    bot.send_message(message.chat.id, "🆘 **Customer Support**\n\nIf you are facing any issues, reach out:\n\n💬 Support Admin: @c_sandeep", parse_mode="Markdown", reply_markup=get_main_menu())
-
-@bot.message_handler(func=lambda msg: msg.text == "🎁 Redeem Code")
-def redeem_code(message):
-    bot.send_message(message.chat.id, "🎁 **Redeem Code**\n\nSend voucher code directly in chat to redeem.", parse_mode="Markdown", reply_markup=get_main_menu())
-
-@bot.message_handler(func=lambda msg: msg.text == "🆔 My ID")
-def my_id(message):
-    bot.send_message(message.chat.id, f"Your User ID is: `{message.from_user.id}`", parse_mode="Markdown")
-
-@bot.message_handler(func=lambda msg: bool(re.search(r'₹(\d+)', msg.text)))
-def handle_price_selection(message):
-    try:
-        text = message.text
-        user_id = message.from_user.id
-        match = re.search(r'₹(\d+)', text)
-        if not match:
-            return
-
-        base_price = float(match.group(1))
-        order_id = f"ord_{int(time.time() * 1000)}"
-        note = f"Payment for {text}"
-
-        upi_uri = f"upi://pay?pa={requests.utils.quote(UPI_VPA)}&pn={requests.utils.quote(UPI_NAME)}&am={base_price}&tr={order_id}&tn={requests.utils.quote(note)}&cu=INR"
-        qr_image_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={requests.utils.quote(upi_uri)}"
-
-        links = {
-            "phonepe": f"phonepe://pay?pa={requests.utils.quote(UPI_VPA)}&pn={requests.utils.quote(UPI_NAME)}&am={base_price}&tr={order_id}&tn={requests.utils.quote(note)}&cu=INR",
-            "gpay": f"tez://upi/pay?pa={requests.utils.quote(UPI_VPA)}&pn={requests.utils.quote(UPI_NAME)}&am={base_price}&tr={order_id}&tn={requests.utils.quote(note)}&cu=INR",
-            "paytm": f"paytmmp://pay?pa={requests.utils.quote(UPI_VPA)}&pn={requests.utils.quote(UPI_NAME)}&am={base_price}&tr={order_id}&tn={requests.utils.quote(note)}&cu=INR",
-            "bhim": f"upi://pay?pa={requests.utils.quote(UPI_VPA)}&pn={requests.utils.quote(UPI_NAME)}&am={base_price}&tr={order_id}&tn={requests.utils.quote(note)}&cu=INR"
-        }
-
+@bot.callback_query_handler(func=lambda call: True)
+def handle_query(call):
+    chat_id = call.message.chat.id
+    
+    if call.data == "shop_menu":
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📦 XSCILENT LOADER", callback_data="loader_menu"))
+        bot.edit_message_text(
+            "📂 **Select a category:**",
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        
+    elif call.data == "loader_menu":
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("XSCILENT 5 HOURS - ₹40", callback_data="buy_5hours"))
+        markup.add(InlineKeyboardButton("⬅️ Back", callback_data="shop_menu"))
+        bot.edit_message_text(
+            "🛒 **Select your plan:**",
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        
+    elif call.data == "buy_5hours":
+        order_id = str(int(time.time()))
         active_checkout_sessions[order_id] = {
-            "userId": user_id,
-            "product": text,
-            "price": base_price,
-            "timestamp": time.time() * 1000
+            "userId": chat_id,
+            "product": "XSCILENT 5 HOURS - ₹40",
+            "price": 40.0,
+            "timestamp": time.time()
         }
+        
+        qr_text = (
+            "💳 **Checkout Session Created!**\n\n"
+            "📦 Product: `XSCILENT 5 HOURS - ₹40`\n"
+            "💰 Amount: **₹40.00**\n\n"
+            "👉 Please pay **₹40.00** via UPI to your designated merchant/number.\n"
+            "⚡ Once paid, your notification forwarder will instantly verify the payment and your key will be delivered here automatically!"
+        )
+        bot.edit_message_text(
+            qr_text,
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            parse_mode="Markdown"
+        )
 
-        print(f"📝 Created checkout session: Order ID {order_id} for Price ₹{base_price} (User: {user_id})")
-
-        caption = f"""
-💳 **Payment Checkout**
-
-💵 Amount: **₹{base_price}**
-📦 Item: `{text}`
-🆔 Order ID: `{order_id}`
-
-📱 **Pay Instantly via Apps:**
-• [PhonePe]({links['phonepe']})
-• [Google Pay]({links['gpay']})
-• [Paytm]({links['paytm']})
-• [Any UPI App]({links['bhim']})
-
-*Scan the QR code or click an app to pay. Your key will be sent **automatically** as soon as payment is confirmed!*
-        """.strip()
-
-        bot.send_photo(message.chat.id, qr_image_url, caption=caption, parse_mode="Markdown")
-    except Exception as error:
-        print("Error generating UPI QR:", error)
-        bot.send_message(message.chat.id, "❌ Failed to generate payment QR code. Please try again later.")
-
+# --- FLASK WEB SERVER & WEBHOOK ROUTE ---
 @app.route('/')
-def index():
-    return "Telegram UPI Bot (Python) is running successfully!", 200
+def home():
+    return "Telegram UPI Bot (Python) is running successfully!"
 
 @app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
     try:
-        # Ultra-flexible parsing for JSON, Form-data, or Raw text
         body = {}
         if request.is_json:
             body = request.get_json(silent=True) or {}
@@ -252,7 +167,8 @@ def webhook():
         session = active_checkout_sessions.get(matched_order_id)
         if not session:
             print("⚠️ Active session not found. Active sessions:", active_checkout_sessions)
-            return jsonify({"error": "Matching active order session not found", "received": raw_input}), 404
+            # Return 200 OK so the forwarder app marks it as SUCCESS instead of FAIL
+            return jsonify({"status": "ignored", "message": "Matching active order session not found"}), 200
 
         user_id = session["userId"]
         product = session["product"]
@@ -285,24 +201,15 @@ def webhook():
             else:
                 bot.send_message(
                     user_id,
-                    f"⚠️ Payment received for **{product}**, but keys are currently out of stock! Please contact support @c_sandeep.",
+                    f"⚠️ Payment received for **{product}**, but keys are currently out of stock! Please contact support.",
                     parse_mode="Markdown"
                 )
 
         return jsonify({"status": "received"}), 200
     except Exception as error:
         print("Webhook processing error:", error)
-        return jsonify({"error": "Internal server error"}), 500
+        return jsonify({"error": "Internal server error"}), 200
 
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-if __name__ == "__main__":
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    print("🌐 Web server thread started...")
-
-    print("🤖 Telegram UPI Bot (Python) is running...")
-    bot.infinity_polling()
+if __name__ == '__main__':
+    # Run Flask server on Render's required host and port
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
