@@ -118,8 +118,8 @@ def get_persistent_keyboard():
 def get_products_category_menu():
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton("🚀 Xscilent Loader", callback_data="cat_loader"),
-        InlineKeyboardButton("🎮 Xscilent Mod BGMI", callback_data="cat_bgmi")
+        InlineKeyboardButton("🚀 Megha Bhai Loader", callback_data="cat_loader"),
+        InlineKeyboardButton("🎮 Megha Bhai Mod BGMI", callback_data="cat_bgmi")
     )
     return markup
 
