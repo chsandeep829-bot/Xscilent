@@ -7,7 +7,7 @@ import qrcode
 import requests
 from flask import Flask, request, jsonify
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -123,22 +123,22 @@ def get_available_apks():
     return []
 
 # --- KEYBOARDS ---
-def get_main_menu():
-    markup = InlineKeyboardMarkup(row_width=1)
+def get_persistent_keyboard():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(
-        InlineKeyboardButton("🔑 Purchase Key", callback_data="menu_purchase"),
-        InlineKeyboardButton("📋 My Keys", callback_data="menu_my_keys"),
-        InlineKeyboardButton("📥 Download App", callback_data="menu_download_app"),
-        InlineKeyboardButton("💰 Check Fund", callback_data="menu_check_fund"),
-        InlineKeyboardButton("📚 How to Buy?", callback_data="menu_how_to_buy")
+        KeyboardButton("🔑 Purchase Key"),
+        KeyboardButton("📋 My Keys"),
+        KeyboardButton("📥 Download App"),
+        KeyboardButton("💰 Check Fund"),
+        KeyboardButton("📚 How to Buy?")
     )
     markup.row(
-        InlineKeyboardButton("🆔 My ID", callback_data="menu_my_id"),
-        InlineKeyboardButton("🆘 Contact Support", callback_data="menu_support")
+        KeyboardButton("🆔 My ID"),
+        KeyboardButton("🆘 Contact Support")
     )
     return markup
 
-def get_products_menu():
+def get_products_inline_menu():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("5 Hours - ₹40", callback_data="buy_5hours"),
@@ -148,22 +148,71 @@ def get_products_menu():
         InlineKeyboardButton("30 Days - ₹800", callback_data="buy_30days"),
         InlineKeyboardButton("Full Season - ₹1200", callback_data="buy_season")
     )
-    markup.add(InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"))
     return markup
 
 # --- TELEGRAM HANDLERS ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    temp_msg = bot.send_message(message.chat.id, "🧹", reply_markup=ReplyKeyboardRemove())
-    try:
-        bot.delete_message(message.chat.id, temp_msg.message_id)
-    except Exception:
-        pass
-
     bot.send_message(
         message.chat.id,
-        "👋 **Welcome to Xscilent Bot!**\n\nChoose an option from the menu below:",
-        reply_markup=get_main_menu(),
+        "👋 **Welcome to Xscilent Bot!**\n\nChoose an option from the keyboard below:",
+        reply_markup=get_persistent_keyboard(),
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(func=lambda message: message.text == "🔑 Purchase Key")
+def handle_purchase_text(message):
+    bot.send_message(
+        message.chat.id,
+        "📦 **Select a plan to purchase:**",
+        reply_markup=get_products_inline_menu(),
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(func=lambda message: message.text == "📋 My Keys")
+def handle_my_keys_text(message):
+    user_id = message.from_user.id
+    keys = user_purchased_keys.get(user_id, [])
+    if keys:
+        keys_text = "\n".join([f"`{k}`" for k in keys])
+        bot.send_message(message.chat.id, f"📋 **Your Purchased Keys:**\n\n{keys_text}", parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, "📋 You haven't purchased any keys yet.", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text == "📥 Download App")
+def handle_download_app_text(message):
+    apks = get_available_apks()
+    if apks:
+        apk_list_text = "📥 **Available Applications for Download:**\n\n"
+        for apk in apks:
+            apk_list_text += f"🔹 [{apk['name']}]({apk['url']})\n"
+        bot.send_message(message.chat.id, apk_list_text, parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, "⚠️ No APK files are currently uploaded. Please check back later.", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text == "💰 Check Fund")
+def handle_check_fund_text(message):
+    bot.send_message(message.chat.id, "💰 **Your Account Balance:**\n\n₹0.0 (Direct UPI QR payment mode active)", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text == "📚 How to Buy?")
+def handle_how_to_buy_text(message):
+    bot.send_message(
+        message.chat.id,
+        "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your desired duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key will be delivered instantly upon payment verification!",
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(func=lambda message: message.text == "🆔 My ID")
+def handle_my_id_text(message):
+    user_id = message.from_user.id
+    bot.send_message(message.chat.id, f"🆔 **Your Telegram Info:**\n\nUser ID: `{user_id}`\nUsername: @{message.from_user.username or 'None'}", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text == "🆘 Contact Support")
+def handle_support_text(message):
+    group_clean_id = SUPPORT_CHAT_ID.replace('-100', '').replace('-', '')
+    bot.send_message(
+        message.chat.id,
+        f"🆘 **Contact Support:**\n\nClick the link below to open our support group:\n👉 [Open Support Group](https://t.me/c/{group_clean_id}/1)",
         parse_mode="Markdown"
     )
 
@@ -202,73 +251,7 @@ def handle_callback(call):
     user_id = call.from_user.id
     data = call.data
 
-    if data == "menu_main":
-        try:
-            bot.edit_message_text(
-                "👋 **Main Menu:**\n\nChoose an option below:",
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                reply_markup=get_main_menu(),
-                parse_mode="Markdown"
-            )
-        except Exception:
-            bot.send_message(chat_id, "👋 **Main Menu:**", reply_markup=get_main_menu(), parse_mode="Markdown")
-
-    elif data == "menu_purchase":
-        bot.edit_message_text(
-            "📦 **Select a plan to purchase:**",
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            reply_markup=get_products_menu(),
-            parse_mode="Markdown"
-        )
-
-    elif data == "menu_my_keys":
-        keys = user_purchased_keys.get(user_id, [])
-        if keys:
-            keys_text = "\n".join([f"`{k}`" for k in keys])
-            bot.answer_callback_query(call.id, "Here are your keys!")
-            bot.send_message(chat_id, f"📋 **Your Purchased Keys:**\n\n{keys_text}", parse_mode="Markdown")
-        else:
-            bot.answer_callback_query(call.id, "No keys found!", show_alert=True)
-            bot.send_message(chat_id, "📋 You haven't purchased any keys yet.", parse_mode="Markdown")
-
-    elif data == "menu_download_app":
-        bot.answer_callback_query(call.id, "Fetching APKs...")
-        apks = get_available_apks()
-        if apks:
-            apk_list_text = "📥 **Available Applications for Download:**\n\n"
-            for apk in apks:
-                apk_list_text += f"🔹 [{apk['name']}]({apk['url']})\n"
-            bot.send_message(chat_id, apk_list_text, parse_mode="Markdown")
-        else:
-            bot.send_message(chat_id, "⚠️ No APK files are currently uploaded. Please check back later.", parse_mode="Markdown")
-
-    elif data == "menu_check_fund":
-        bot.answer_callback_query(call.id, "Balance checked")
-        bot.send_message(chat_id, "💰 **Your Account Balance:**\n\n₹0.0 (Direct UPI QR payment mode active)", parse_mode="Markdown")
-
-    elif data == "menu_how_to_buy":
-        bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your desired duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key will be delivered instantly upon payment verification!",
-            parse_mode="Markdown"
-        )
-
-    elif data == "menu_my_id":
-        bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, f"🆔 **Your Telegram Info:**\n\nUser ID: `{user_id}`\nUsername: @{call.from_user.username or 'None'}", parse_mode="Markdown")
-
-    elif data == "menu_support":
-        bot.answer_callback_query(call.id, "Opening Support Group...")
-        bot.send_message(
-            chat_id,
-            f"🆘 **Contact Support:**\n\nClick the link below to open our support group:\n👉 [Open Support Group](https://t.me/c/{SUPPORT_CHAT_ID.replace('-100', '').replace('-', '')}/1)",
-            parse_mode="Markdown"
-        )
-
-    elif data.startswith("buy_"):
+    if data.startswith("buy_"):
         product_name, price = get_product_details(data)
         order_id = str(int(time.time()))
         
@@ -284,7 +267,11 @@ def handle_callback(call):
         img.save(bio, 'PNG')
         bio.seek(0)
         
-        bot.delete_message(chat_id, call.message.message_id)
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except Exception:
+            pass
+            
         sent_msg = bot.send_photo(
             chat_id,
             photo=bio,
@@ -308,7 +295,7 @@ def handle_callback(call):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Telegram UPI Bot is running successfully!"
+    return "Telegram UPI Bot with Persistent Keyboard is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -365,7 +352,6 @@ def macro_webhook():
                             except Exception as del_err:
                                 print("Could not delete QR message:", del_err)
                             
-                            # Main menu options removed from payment completion message as requested
                             bot.send_message(
                                 user_id,
                                 f"✅ **Payment Verified & Key Delivered!**\n\n📦 Product: `{product_name}`\n🔑 Your Key:\n`{delivered_key}`\n\n(You can view your keys anytime using 'My Keys' in the menu)",
