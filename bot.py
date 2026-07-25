@@ -2,9 +2,8 @@ import os
 import re
 import time
 import base64
-import threading
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
@@ -13,13 +12,14 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")       # Your GitHub Personal Access Token
 GITHUB_REPO = os.getenv("GITHUB_REPO")         # e.g., "username/repo-name"
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
+SMS_CHAT_ID = os.getenv("SMS_CHAT_ID")         # Optional: Restrict SMS parsing to this specific Chat ID
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# In-memory storage for active checkout sessions and purchased keys
+# In-memory storage for active checkout sessions
 active_checkout_sessions = {}  
-user_purchased_keys = {}
 
 # --- GITHUB KEY MANAGEMENT HELPERS ---
 def get_file_path_for_product(product_name):
@@ -81,15 +81,15 @@ def send_welcome(message):
     )
     bot.send_message(
         message.chat.id,
-        "👋 **Welcome to Xscilent Bot!**\n\nSelect a plan below to purchase your key automatically:",
+        "👋 **Welcome to Xscilent Bot!**\n\nSelect a plan below to create your checkout session:",
         reply_markup=markup,
         parse_mode="Markdown"
     )
 
 @bot.message_handler(func=lambda message: True)
-def handle_text_selection(message):
+def handle_incoming_message(message):
+    text = message.text or ""
     chat_id = message.chat.id
-    text = message.text
     
     product_map = {
         "XSCILENT 5 HOURS - ₹40": 40.0,
@@ -100,6 +100,7 @@ def handle_text_selection(message):
         "XSCILENT FULL SEASON - ₹1200": 1200.0
     }
     
+    # 1. Handle user clicking a buy button in private chat
     if text in product_map:
         price = product_map[text]
         order_id = str(int(time.time()))
@@ -111,114 +112,79 @@ def handle_text_selection(message):
             "timestamp": time.time()
         }
         
-        qr_text = (
+        bot.send_message(
+            chat_id,
             f"💳 **Checkout Session Created!**\n\n"
             f"📦 Product: `{text}`\n"
             f"💰 Amount: **₹{price}**\n\n"
-            f"👉 Please pay **₹{price}** via UPI to your designated merchant/number.\n"
-            f"⚡ Once paid, your notification forwarder will instantly verify the payment and your key will be delivered here automatically!"
+            f"👉 Please pay **₹{price}** via UPI.\n"
+            f"⚡ Once paid, your SMS forwarder app will send the notification here, and your key will be delivered instantly!",
+            parse_mode="Markdown"
         )
-        bot.send_message(chat_id, qr_text, parse_mode="Markdown")
-    else:
-        bot.send_message(chat_id, "Please select a valid plan using the buttons below, or type /start.")
+        return
 
-# --- FLASK WEB SERVER & WEBHOOK ROUTE ---
-@app.route('/')
-def home():
-    return "Telegram UPI Bot (Python) is running successfully!"
+    # 2. Handle forwarded SMS payment notifications from the authorized group
+    if SMS_CHAT_ID and str(chat_id) != str(SMS_CHAT_ID):
+        return  # Ignore messages from other chats for security
 
-@app.route('/webhook', methods=['POST', 'GET'])
-def webhook():
-    try:
-        body = {}
-        if request.is_json:
-            body = request.get_json(silent=True) or {}
-        elif request.form:
-            body = request.form.to_dict()
-        else:
-            try:
-                body = request.get_json(silent=True) or {}
-            except Exception:
-                pass
-
-        raw_data = request.data.decode('utf-8', errors='ignore')
-        print("📥 Webhook Payload Received:", body, "Raw:", raw_data)
+    amount_match = re.search(r'(?:₹|Rs\.?)\s*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+    if amount_match:
+        received_amount = float(amount_match.group(1))
+        print(f"🔍 Detected amount from authorized SMS stream: ₹{received_amount}")
         
-        raw_input = f"{body} {raw_data} {body.get('title', '')} {body.get('text', '')} {body.get('msg', '')}"
         matched_order_id = None
-        amount_match = re.search(r'(?:₹|Rs\.?)\s*(\d+(?:\.\d+)?)', raw_input, re.IGNORECASE)
-
-        if amount_match:
-            received_amount = float(amount_match.group(1))
-            print(f"🔍 Detected amount from webhook payload: ₹{received_amount}")
-            
-            latest_time = 0
-            for order_id, session in active_checkout_sessions.items():
-                if session["price"] == received_amount and session["timestamp"] > latest_time:
-                    latest_time = session["timestamp"]
-                    matched_order_id = order_id
-
-        print(f"🎯 Matched Order ID: {matched_order_id}")
-
+        latest_time = 0
+        for order_id, session in active_checkout_sessions.items():
+            if session["price"] == received_amount and session["timestamp"] > latest_time:
+                latest_time = session["timestamp"]
+                matched_order_id = order_id
+                
         session = active_checkout_sessions.get(matched_order_id)
-        if not session:
-            print("⚠️ Active session not found. Active sessions:", active_checkout_sessions)
-            return jsonify({"status": "ignored", "message": "Matching active order session not found"}), 200
-
-        user_id = session["userId"]
-        product = session["product"]
-        price = session["price"]
-        file_path = get_file_path_for_product(product)
-
-        if file_path:
-            keys, _ = fetch_keys_from_github(file_path)
-            if keys:
-                delivered_key = keys[0]
-                success = remove_key_from_github(file_path, delivered_key)
-
-                if success:
-                    if user_id not in user_purchased_keys:
-                        user_purchased_keys[user_id] = []
-                    user_purchased_keys[user_id].append({
-                        "product": product,
-                        "key": delivered_key,
-                        "price": price
-                    })
-
+        if session:
+            user_id = session["userId"]
+            product = session["product"]
+            file_path = get_file_path_for_product(product)
+            
+            if file_path:
+                keys, _ = fetch_keys_from_github(file_path)
+                if keys:
+                    delivered_key = keys[0]
+                    success = remove_key_from_github(file_path, delivered_key)
+                    
+                    if success:
+                        bot.send_message(
+                            user_id,
+                            f"✅ **Payment Verified via SMS & Key Delivered!**\n\n📦 Product: `{product}`\n🔑 Your Key:\n`{delivered_key}`",
+                            parse_mode="Markdown"
+                        )
+                        del active_checkout_sessions[matched_order_id]
+                        return
+                else:
                     bot.send_message(
                         user_id,
-                        f"✅ **Payment Verified & Key Delivered Automatically!**\n\n📦 Product: `{product}`\n🔑 Your Key:\n`{delivered_key}`",
+                        f"⚠️ Payment received for **{product}**, but keys are currently out of stock!",
                         parse_mode="Markdown"
                     )
 
-                    del active_checkout_sessions[matched_order_id]
-                    return jsonify({"status": "success", "message": "Key delivered successfully"}), 200
-            else:
-                bot.send_message(
-                    user_id,
-                    f"⚠️ Payment received for **{product}**, but keys are currently out of stock! Please contact support.",
-                    parse_mode="Markdown"
-                )
+# --- FLASK WEB SERVER & WEBHOOK ROUTES ---
+@app.route('/')
+def home():
+    return "Telegram UPI Bot (SMS Forwarder Mode) is running successfully!"
 
-        return jsonify({"status": "received"}), 200
-    except Exception as error:
-        print("Webhook processing error:", error)
-        return jsonify({"error": "Internal server error"}), 200
-
-# --- RUN BOT & WEB SERVER CONCURRENTLY ---
-def run_telegram_bot():
-    while True:
-        try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"Telegram polling error: {e}")
-            time.sleep(5)
+@app.route(f'/bot/{TOKEN}', methods=['POST'])
+def telegram_webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    return 'Forbidden', 403
 
 if __name__ == '__main__':
-    # Start Telegram Bot Polling in a background thread
-    bot_thread = threading.Thread(target=run_telegram_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    # Run Flask Web Server on Render's required host and port
+    webhook_url = f"{RENDER_URL}/bot/{TOKEN}"
+    bot.remove_webhook()
+    time.sleep(1)
+    bot.set_webhook(url=webhook_url)
+    print(f"🔗 Telegram Webhook set to: {webhook_url}")
+
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
