@@ -20,6 +20,9 @@ UPI_NAME = os.getenv("UPI_NAME", "Xscilent")
 SUPPORT_CHAT_ID = "-5409271468"
 OBB_GROUP_LINK = "https://t.me/c/5409271468/1"
 
+BGMI_APK_LINK = "https://github.com/chsandeep829-bot/Xscilent/releases/download/v1.0.0/bgmi.apk"
+LOADER_APK_LINK = "https://github.com/chsandeep829-bot/Xscilent/releases/download/v1.0.0/loader.apk"
+
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
@@ -355,12 +358,10 @@ def macro_webhook():
                             is_loader = "loader" in product_code
                             try:
                                 if is_loader:
-                                    loader_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/loader.apk"
-                                    bot.send_document(user_id, document=loader_url, caption="📥 Here is your Xscilent Loader APK file!")
+                                    bot.send_document(user_id, document=LOADER_APK_LINK, caption="📥 Here is your Xscilent Loader APK file!")
                                 else:
-                                    # Send BGMI APK from root repository path
-                                    bgmi_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/bgmi.apk"
-                                    bot.send_document(user_id, document=bgmi_url, caption="📥 Here is your Xscilent Mod BGMI APK file!")
+                                    # Send BGMI APK from release link
+                                    bot.send_document(user_id, document=BGMI_APK_LINK, caption="📥 Here is your Xscilent Mod BGMI APK file!")
                                     
                                     # Send OBB Group Link Button using your group ID
                                     obb_markup = InlineKeyboardMarkup()
