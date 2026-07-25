@@ -16,9 +16,9 @@ GITHUB_REPO = os.getenv("GITHUB_REPO")
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
 UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") 
-UPI_NAME = os.getenv("UPI_NAME", "MeghaBhai")  
+UPI_NAME = os.getenv("UPI_NAME", "Xscilent")  
 SUPPORT_CHAT_ID = "-5409271468"
-OBB_GROUP_LINK = "https://t.me/c/5409271468/1" # Configured with your group ID
+OBB_GROUP_LINK = "https://t.me/c/5409271468/1"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -47,7 +47,7 @@ def get_file_path_for_product(product_code):
     return mapping.get(product_code)
 
 def get_product_details(product_code):
-    cat_prefix = "Megha Bhai Loader" if "loader" in product_code else "Megha Bhai Mod BGMI"
+    cat_prefix = "Xscilent Loader" if "loader" in product_code else "Xscilent Mod BGMI"
     
     if "5hours" in product_code:
         return (f"{cat_prefix} - 5 HOURS", 40.0)
@@ -115,8 +115,8 @@ def get_persistent_keyboard():
 def get_products_category_menu():
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton("🚀 Megha Bhai Loader", callback_data="cat_loader"),
-        InlineKeyboardButton("🎮 Megha Bhai Mod BGMI", callback_data="cat_bgmi")
+        InlineKeyboardButton("🚀 Xscilent Loader", callback_data="cat_loader"),
+        InlineKeyboardButton("🎮 Xscilent Mod BGMI", callback_data="cat_bgmi")
     )
     return markup
 
@@ -138,7 +138,7 @@ def get_duration_menu(category):
 def send_welcome(message):
     bot.send_message(
         message.chat.id,
-        "👋 **Welcome to Megha Bhai Bot!**\n\nChoose an option from the keyboard below:",
+        "👋 **Welcome to Xscilent Bot!**\n\nChoose an option from the keyboard below:",
         reply_markup=get_persistent_keyboard(),
         parse_mode="Markdown"
     )
@@ -195,7 +195,7 @@ def handle_callback(call):
 
     if data == "cat_loader":
         bot.edit_message_text(
-            "🚀 **Select a plan for Megha Bhai Loader:**",
+            "🚀 **Select a plan for Xscilent Loader:**",
             chat_id=chat_id,
             message_id=call.message.message_id,
             reply_markup=get_duration_menu("loader"),
@@ -205,7 +205,7 @@ def handle_callback(call):
 
     elif data == "cat_bgmi":
         bot.edit_message_text(
-            "🎮 **Select a plan for Megha Bhai Mod BGMI:**",
+            "🎮 **Select a plan for Xscilent Mod BGMI:**",
             chat_id=chat_id,
             message_id=call.message.message_id,
             reply_markup=get_duration_menu("bgmi"),
@@ -283,7 +283,7 @@ def handle_callback(call):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Megha Bhai Bot with Group OBB Redirect is running successfully!"
+    return "Xscilent Bot is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -355,12 +355,12 @@ def macro_webhook():
                             is_loader = "loader" in product_code
                             try:
                                 if is_loader:
-                                    loader_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/apks/loader.apk"
-                                    bot.send_document(user_id, document=loader_url, caption="📥 Here is your Loader APK file!")
+                                    loader_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/loader.apk"
+                                    bot.send_document(user_id, document=loader_url, caption="📥 Here is your Xscilent Loader APK file!")
                                 else:
-                                    # Send BGMI APK
-                                    bgmi_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/apks/bgmi.apk"
-                                    bot.send_document(user_id, document=bgmi_url, caption="📥 Here is your BGMI APK file!")
+                                    # Send BGMI APK from root repository path
+                                    bgmi_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/bgmi.apk"
+                                    bot.send_document(user_id, document=bgmi_url, caption="📥 Here is your Xscilent Mod BGMI APK file!")
                                     
                                     # Send OBB Group Link Button using your group ID
                                     obb_markup = InlineKeyboardMarkup()
@@ -393,8 +393,8 @@ def macro_webhook():
 
 if __name__ == '__main__':
     try:
-        bot.set_my_short_description("Get instant keys & files for Megha Bhai Loader & BGMI Mod!")
-        bot.set_my_description("Welcome to Megha Bhai Bot! Purchase instant keys and download files securely.")
+        bot.set_my_short_description("Get instant keys & files for Xscilent Loader & BGMI Mod!")
+        bot.set_my_description("Welcome to Xscilent Bot! Purchase instant keys and download files securely.")
     except Exception as e:
         print("Could not update bot descriptions:", e)
 
