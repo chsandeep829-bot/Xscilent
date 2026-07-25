@@ -7,7 +7,7 @@ import qrcode
 import requests
 from flask import Flask, request, jsonify
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -114,6 +114,13 @@ def get_products_menu():
 # --- TELEGRAM BOT HANDLERS ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    # Clear old bottom reply keyboard first
+    temp_msg = bot.send_message(message.chat.id, "🧹", reply_markup=ReplyKeyboardRemove())
+    try:
+        bot.delete_message(message.chat.id, temp_msg.message_id)
+    except Exception:
+        pass
+
     bot.send_message(
         message.chat.id,
         "👋 **Welcome to Xscilent Bot!**\n\nChoose an option from the menu below:",
@@ -224,7 +231,7 @@ def handle_callback(call):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Telegram UPI Bot with Custom Menu is running successfully!"
+    return "Telegram UPI Bot (Menu Cleaned) is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -272,12 +279,10 @@ def macro_webhook():
                         success = remove_key_from_github(file_path, delivered_key)
                         
                         if success:
-                            # Save key to user's storage
                             if user_id not in user_purchased_keys:
                                 user_purchased_keys[user_id] = []
                             user_purchased_keys[user_id].append(delivered_key)
 
-                            # Delete QR code message
                             try:
                                 bot.delete_message(chat_id=user_id, message_id=session["message_id"])
                             except Exception as del_err:
