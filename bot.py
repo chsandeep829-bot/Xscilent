@@ -8,7 +8,13 @@ import requests
 from flask import Flask, request, jsonify
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from twilio.rest import Client
+
+# Safe import for Twilio so deployment never fails with ModuleNotFoundError
+try:
+    from twilio.rest import Client
+    TWILIO_AVAILABLE = True
+except ImportError:
+    TWILIO_AVAILABLE = False
 
 # --- CONFIGURATION ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -56,8 +62,8 @@ def alert_owner_out_of_stock(product_name):
         except Exception as e:
             print("Error sending admin telegram alert:", e)
 
-    # 2. Send SMS and Make Call via Twilio
-    if TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM:
+    # 2. Send SMS and Make Call via Twilio (if installed & configured)
+    if TWILIO_AVAILABLE and TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM:
         try:
             client = Client(TWILIO_SID, TWILIO_TOKEN)
             
@@ -78,7 +84,7 @@ def alert_owner_out_of_stock(product_name):
         except Exception as e:
             print("Twilio alert error:", e)
     else:
-        print("⚠️ Twilio credentials not configured. SMS/Call skipped, Telegram alert sent.")
+        print("⚠️ Twilio package or credentials not configured. SMS/Call skipped, Telegram alert sent.")
 
 # --- GITHUB HELPERS FOR KEYS ---
 def get_file_path_for_product(product_code):
@@ -333,7 +339,6 @@ def handle_callback(call):
         if file_path:
             keys, _ = fetch_keys_from_github(file_path)
             if not keys:
-                # Trigger out of stock alert to owner (Text & Call +91 9494524588)
                 alert_owner_out_of_stock(product_name)
                 
                 bot.answer_callback_query(call.id, "❌ Out of Stock!", show_alert=True)
@@ -343,7 +348,7 @@ def handle_callback(call):
                     pass
                 bot.send_message(
                     chat_id,
-                    f"❌ **Out of Stock!**\n\nSorry, **{product_name}** is currently out of stock on GitHub. The owner has been immediately notified via text and call to refill keys. Please check back later!",
+                    f"❌ **Out of Stock!**\n\nSorry, **{product_name}** is currently out of stock on GitHub. The owner has been immediately notified to refill keys. Please check back later!",
                     parse_mode="Markdown"
                 )
                 return
@@ -499,11 +504,10 @@ def macro_webhook():
                             del active_checkout_sessions[matched_order_id]
                             return jsonify({"status": "success", "message": "Key and link delivered"}), 200
                     else:
-                        # Out of stock when payment arrived
                         alert_owner_out_of_stock(product_name)
                         bot.send_message(
                             user_id,
-                            f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub! The owner has been alerted via text and call to refill keys immediately.",
+                            f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub! The owner has been alerted.",
                             parse_mode="Markdown"
                         )
                         
