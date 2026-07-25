@@ -215,14 +215,25 @@ def handle_price_selection(message):
 def index():
     return "Telegram UPI Bot (Python) is running successfully!", 200
 
-@app.route('/webhook', methods=['POST'])
+@app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
     try:
-        body = request.get_json(silent=True) or {}
-        print("📥 Webhook Payload Received:", body)
+        # Ultra-flexible parsing for JSON, Form-data, or Raw text
+        body = {}
+        if request.is_json:
+            body = request.get_json(silent=True) or {}
+        elif request.form:
+            body = request.form.to_dict()
+        else:
+            try:
+                body = request.get_json(silent=True) or {}
+            except Exception:
+                pass
+
+        raw_data = request.data.decode('utf-8', errors='ignore')
+        print("📥 Webhook Payload Received:", body, "Raw:", raw_data)
         
-        # Aggregate properties to capture payload details from SMS/Notification forwarder
-        raw_input = f"{body} {body.get('title', '')} {body.get('text', '')} {body.get('msg', '')}"
+        raw_input = f"{body} {raw_data} {body.get('title', '')} {body.get('text', '')} {body.get('msg', '')}"
         matched_order_id = None
         amount_match = re.search(r'(?:₹|Rs\.?)\s*(\d+(?:\.\d+)?)', raw_input, re.IGNORECASE)
 
