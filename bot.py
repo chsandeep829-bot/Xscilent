@@ -18,15 +18,16 @@ RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
 UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") # Your UPI ID from Render environment
 UPI_NAME = os.getenv("UPI_NAME", "Xscilent")   # Display name on UPI apps
 SUPPORT_CHAT_ID = "-5409271468"
+ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")     # Your Telegram Admin ID
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # In-memory storage
 active_checkout_sessions = {}  
-user_purchased_keys = {}  # Stores keys bought by users: {user_id: [key1, key2]}
+user_purchased_keys = {}  
 
-# --- GITHUB KEY MANAGEMENT HELPERS ---
+# --- GITHUB HELPERS ---
 def get_file_path_for_product(product_code):
     mapping = {
         "buy_5hours": "keys_5h.txt",
@@ -83,12 +84,51 @@ def remove_key_from_github(file_path, key_to_remove):
     response = requests.put(url, headers=headers, json=payload)
     return response.status_code in [200, 201]
 
+def upload_apk_to_github(file_bytes, filename):
+    file_path = f"apks/{filename}"
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
+    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
+    
+    res = requests.get(url, headers=headers)
+    sha = res.json().get("sha") if res.status_code == 200 else None
+
+    encoded_content = base64.b64encode(file_bytes).decode("utf-8")
+    payload = {
+        "message": f"Upload APK {filename}",
+        "content": encoded_content,
+        "branch": GITHUB_BRANCH
+    }
+    if sha:
+        payload["sha"] = sha
+
+    put_res = requests.put(url, headers=headers, json=payload)
+    if put_res.status_code in [200, 201]:
+        return f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{file_path}"
+    return None
+
+def get_available_apks():
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/apks"
+    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        items = res.json()
+        apks = []
+        for item in items:
+            if item["name"].endswith(".apk"):
+                apks.append({
+                    "name": item["name"],
+                    "url": item["download_url"]
+                })
+        return apks
+    return []
+
 # --- KEYBOARDS ---
 def get_main_menu():
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
         InlineKeyboardButton("🔑 Purchase Key", callback_data="menu_purchase"),
         InlineKeyboardButton("📋 My Keys", callback_data="menu_my_keys"),
+        InlineKeyboardButton("📥 Download App", callback_data="menu_download_app"),
         InlineKeyboardButton("💰 Check Fund", callback_data="menu_check_fund"),
         InlineKeyboardButton("📚 How to Buy?", callback_data="menu_how_to_buy")
     )
@@ -111,10 +151,9 @@ def get_products_menu():
     markup.add(InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main"))
     return markup
 
-# --- TELEGRAM BOT HANDLERS ---
+# --- TELEGRAM HANDLERS ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    # Clear old bottom reply keyboard first
     temp_msg = bot.send_message(message.chat.id, "🧹", reply_markup=ReplyKeyboardRemove())
     try:
         bot.delete_message(message.chat.id, temp_msg.message_id)
@@ -127,6 +166,35 @@ def send_welcome(message):
         reply_markup=get_main_menu(),
         parse_mode="Markdown"
     )
+
+@bot.message_handler(content_types=['document'])
+def handle_apk_upload(message):
+    user_id = message.from_user.id
+    if ADMIN_USER_ID and str(user_id) != str(ADMIN_USER_ID):
+        bot.send_message(user_id, "⚠️ Only the admin is authorized to upload APK files.")
+        return
+        
+    file_name = message.document.file_name or "app.apk"
+    if not file_name.endswith('.apk'):
+        bot.send_message(user_id, "⚠️ Please upload a valid .apk file.")
+        return
+        
+    bot.send_message(user_id, "⏳ Downloading and uploading APK to GitHub storage...")
+    try:
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        raw_url = upload_apk_to_github(downloaded_file, file_name)
+        if raw_url:
+            bot.send_message(
+                user_id,
+                f"✅ **APK Uploaded Successfully!**\n\n📁 Filename: `{file_name}`\n🔗 Download Link:\n{raw_url}\n\nUsers can now download it via the 'Download App' button!",
+                parse_mode="Markdown"
+            )
+        else:
+            bot.send_message(user_id, "❌ Failed to upload APK to GitHub.")
+    except Exception as e:
+        bot.send_message(user_id, f"❌ Error uploading file: {str(e)}")
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
@@ -165,6 +233,17 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "No keys found!", show_alert=True)
             bot.send_message(chat_id, "📋 You haven't purchased any keys yet.", parse_mode="Markdown")
 
+    elif data == "menu_download_app":
+        bot.answer_callback_query(call.id, "Fetching APKs...")
+        apks = get_available_apks()
+        if apks:
+            apk_list_text = "📥 **Available Applications for Download:**\n\n"
+            for apk in apks:
+                apk_list_text += f"🔹 [{apk['name']}]({apk['url']})\n"
+            bot.send_message(chat_id, apk_list_text, parse_mode="Markdown")
+        else:
+            bot.send_message(chat_id, "⚠️ No APK files are currently uploaded. Please check back later.", parse_mode="Markdown")
+
     elif data == "menu_check_fund":
         bot.answer_callback_query(call.id, "Balance checked")
         bot.send_message(chat_id, "💰 **Your Account Balance:**\n\n₹0.0 (Direct UPI QR payment mode active)", parse_mode="Markdown")
@@ -193,10 +272,8 @@ def handle_callback(call):
         product_name, price = get_product_details(data)
         order_id = str(int(time.time()))
         
-        # Construct UPI Payment Link
         upi_url = f"upi://pay?pa={UPI_VPA}&pn={UPI_NAME}&am={price}&cu=INR"
         
-        # Generate QR Code image in memory
         qr = qrcode.QRCode(version=1, box_size=10, border=4)
         qr.add_data(upi_url)
         qr.make(fit=True)
@@ -231,7 +308,7 @@ def handle_callback(call):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Telegram UPI Bot (Menu Cleaned) is running successfully!"
+    return "Telegram UPI Bot is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -288,10 +365,10 @@ def macro_webhook():
                             except Exception as del_err:
                                 print("Could not delete QR message:", del_err)
                             
+                            # Main menu options removed from payment completion message as requested
                             bot.send_message(
                                 user_id,
-                                f"✅ **Payment Verified & Key Delivered!**\n\n📦 Product: `{product_name}`\n🔑 Your Key:\n`{delivered_key}`\n\n(You can also view your keys anytime using 'My Keys' in the menu)",
-                                reply_markup=get_main_menu(),
+                                f"✅ **Payment Verified & Key Delivered!**\n\n📦 Product: `{product_name}`\n🔑 Your Key:\n`{delivered_key}`\n\n(You can view your keys anytime using 'My Keys' in the menu)",
                                 parse_mode="Markdown"
                             )
                             del active_checkout_sessions[matched_order_id]
@@ -300,7 +377,6 @@ def macro_webhook():
                         bot.send_message(
                             user_id,
                             f"⚠️ Payment received for **{product_name}**, but keys are currently out of stock on GitHub!",
-                            reply_markup=get_main_menu(),
                             parse_mode="Markdown"
                         )
                         
