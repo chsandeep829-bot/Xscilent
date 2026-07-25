@@ -16,7 +16,7 @@ GITHUB_REPO = os.getenv("GITHUB_REPO")         # e.g., "username/repo-name"
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "https://xscilent.onrender.com")
 UPI_VPA = os.getenv("UPI_VPA", "yourname@upi") # Your UPI ID from Render environment
-UPI_NAME = os.getenv("UPI_NAME", "Xscilent")   # Display name on UPI apps
+UPI_NAME = os.getenv("UPI_NAME", "MeghaBhai")  # Display name on UPI apps
 SUPPORT_CHAT_ID = "-5409271468"
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")     # Your Telegram Admin ID
 
@@ -49,7 +49,7 @@ def get_file_path_for_product(product_code):
     return mapping.get(product_code)
 
 def get_product_details(product_code):
-    cat_prefix = "Xscilent Loader" if "loader" in product_code else "Xscilent Mod BGMI"
+    cat_prefix = "Megha Bhai Loader" if "loader" in product_code else "Megha Bhai Mod BGMI"
     
     if "5hours" in product_code:
         return (f"{cat_prefix} - 5 HOURS", 40.0)
@@ -99,51 +99,12 @@ def remove_key_from_github(file_path, key_to_remove):
     response = requests.put(url, headers=headers, json=payload)
     return response.status_code in [200, 201]
 
-def upload_apk_to_github(file_bytes, filename):
-    file_path = f"apks/{filename}"
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
-    
-    res = requests.get(url, headers=headers)
-    sha = res.json().get("sha") if res.status_code == 200 else None
-
-    encoded_content = base64.b64encode(file_bytes).decode("utf-8")
-    payload = {
-        "message": f"Upload APK {filename}",
-        "content": encoded_content,
-        "branch": GITHUB_BRANCH
-    }
-    if sha:
-        payload["sha"] = sha
-
-    put_res = requests.put(url, headers=headers, json=payload)
-    if put_res.status_code in [200, 201]:
-        return f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{file_path}"
-    return None
-
-def get_available_apks():
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/apks"
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
-    res = requests.get(url, headers=headers)
-    if res.status_code == 200:
-        items = res.json()
-        apks = []
-        for item in items:
-            if item["name"].endswith(".apk"):
-                apks.append({
-                    "name": item["name"],
-                    "url": item["download_url"]
-                })
-        return apks
-    return []
-
 # --- KEYBOARDS ---
 def get_persistent_keyboard():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(
         KeyboardButton("🔑 Purchase Key"),
         KeyboardButton("📋 My Keys"),
-        KeyboardButton("📥 Download App"),
         KeyboardButton("💰 Check Fund"),
         KeyboardButton("📚 How to Buy?")
     )
@@ -156,8 +117,8 @@ def get_persistent_keyboard():
 def get_products_category_menu():
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton("🚀 Xscilent Loader", callback_data="cat_loader"),
-        InlineKeyboardButton("🎮 Xscilent Mod BGMI", callback_data="cat_bgmi")
+        InlineKeyboardButton("🚀 Megha Bhai Loader", callback_data="cat_loader"),
+        InlineKeyboardButton("🎮 Megha Bhai Mod BGMI", callback_data="cat_bgmi")
     )
     return markup
 
@@ -179,7 +140,7 @@ def get_duration_menu(category):
 def send_welcome(message):
     bot.send_message(
         message.chat.id,
-        "👋 **Welcome to Xscilent Bot!**\n\nChoose an option from the keyboard below:",
+        "👋 **Welcome to Megha Bhai Bot!**\n\nChoose an option from the keyboard below:",
         reply_markup=get_persistent_keyboard(),
         parse_mode="Markdown"
     )
@@ -203,17 +164,6 @@ def handle_my_keys_text(message):
     else:
         bot.send_message(message.chat.id, "📋 You haven't purchased any keys yet.", parse_mode="Markdown")
 
-@bot.message_handler(func=lambda message: message.text == "📥 Download App")
-def handle_download_app_text(message):
-    apks = get_available_apks()
-    if apks:
-        apk_list_text = "📥 **Available Applications for Download:**\n\n"
-        for apk in apks:
-            apk_list_text += f"🔹 [{apk['name']}]({apk['url']})\n"
-        bot.send_message(message.chat.id, apk_list_text, parse_mode="Markdown")
-    else:
-        bot.send_message(message.chat.id, "⚠️ No APK files are currently uploaded. Please check back later.", parse_mode="Markdown")
-
 @bot.message_handler(func=lambda message: message.text == "💰 Check Fund")
 def handle_check_fund_text(message):
     bot.send_message(message.chat.id, "💰 **Your Account Balance:**\n\n₹0.0 (Direct UPI QR payment mode active)", parse_mode="Markdown")
@@ -222,7 +172,7 @@ def handle_check_fund_text(message):
 def handle_how_to_buy_text(message):
     bot.send_message(
         message.chat.id,
-        "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your product & duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key and download link will be delivered instantly upon payment verification!",
+        "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your product & duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key and app file will be delivered instantly upon payment verification!",
         parse_mode="Markdown"
     )
 
@@ -240,35 +190,6 @@ def handle_support_text(message):
         parse_mode="Markdown"
     )
 
-@bot.message_handler(content_types=['document'])
-def handle_apk_upload(message):
-    user_id = message.from_user.id
-    if ADMIN_USER_ID and str(user_id) != str(ADMIN_USER_ID):
-        bot.send_message(user_id, "⚠️ Only the admin is authorized to upload APK files.")
-        return
-        
-    file_name = message.document.file_name or "app.apk"
-    if not file_name.endswith('.apk'):
-        bot.send_message(user_id, "⚠️ Please upload a valid .apk file.")
-        return
-        
-    bot.send_message(user_id, "⏳ Downloading and uploading APK to GitHub storage...")
-    try:
-        file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        
-        raw_url = upload_apk_to_github(downloaded_file, file_name)
-        if raw_url:
-            bot.send_message(
-                user_id,
-                f"✅ **APK Uploaded Successfully!**\n\n📁 Filename: `{file_name}`\n🔗 Download Link:\n{raw_url}\n\nUsers can now download it via the 'Download App' button!",
-                parse_mode="Markdown"
-            )
-        else:
-            bot.send_message(user_id, "❌ Failed to upload APK to GitHub.")
-    except Exception as e:
-        bot.send_message(user_id, f"❌ Error uploading file: {str(e)}")
-
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     chat_id = call.message.chat.id
@@ -276,7 +197,7 @@ def handle_callback(call):
 
     if data == "cat_loader":
         bot.edit_message_text(
-            "🚀 **Select a plan for Xscilent Loader:**",
+            "🚀 **Select a plan for Megha Bhai Loader:**",
             chat_id=chat_id,
             message_id=call.message.message_id,
             reply_markup=get_duration_menu("loader"),
@@ -286,7 +207,7 @@ def handle_callback(call):
 
     elif data == "cat_bgmi":
         bot.edit_message_text(
-            "🎮 **Select a plan for Xscilent Mod BGMI:**",
+            "🎮 **Select a plan for Megha Bhai Mod BGMI:**",
             chat_id=chat_id,
             message_id=call.message.message_id,
             reply_markup=get_duration_menu("bgmi"),
@@ -308,7 +229,6 @@ def handle_callback(call):
         product_name, price = get_product_details(data)
         file_path = get_file_path_for_product(data)
         
-        # Check stock before generating QR code to prevent user loss
         if file_path:
             keys, _ = fetch_keys_from_github(file_path)
             if not keys:
@@ -349,7 +269,7 @@ def handle_callback(call):
                     f"📦 Product: `{product_name}`\n"
                     f"💰 Amount: **₹{price}**\n\n"
                     f"📱 **Scan the QR code above** using GPay, PhonePe, or Paytm to pay instantly.\n\n"
-                    f"⚡ Once paid, MacroDroid will instantly notify this bot and your key will be delivered automatically!",
+                    f"⚡ Once paid, MacroDroid will instantly notify this bot and your key & app file will be delivered automatically!",
             parse_mode="Markdown"
         )
         
@@ -365,7 +285,7 @@ def handle_callback(call):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Telegram UPI Bot with Multiple Products & Stock Protection is running successfully!"
+    return "Megha Bhai Bot with Post-Payment APK Delivery is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -404,7 +324,8 @@ def macro_webhook():
             if session:
                 user_id = session["userId"]
                 product_name = session["product_name"]
-                file_path = get_file_path_for_product(session["product_code"])
+                product_code = session["product_code"]
+                file_path = get_file_path_for_product(product_code)
                 
                 if file_path:
                     keys, _ = fetch_keys_from_github(file_path)
@@ -422,30 +343,32 @@ def macro_webhook():
                             except Exception as del_err:
                                 print("Could not delete QR message:", del_err)
                             
-                            apks = get_available_apks()
-                            apk_text_section = ""
-                            success_markup = InlineKeyboardMarkup()
-                            
-                            if apks:
-                                apk_text_section = "\n\n📥 **Download App:**\n"
-                                for apk in apks:
-                                    apk_text_section += f"🔹 [{apk['name']}]({apk['url']})\n"
-                                    success_markup.add(InlineKeyboardButton(f"📥 Download {apk['name']}", url=apk['url']))
-                            
-                            markup_to_use = success_markup if apks else None
-
+                            # Send Key First
                             bot.send_message(
                                 user_id,
                                 f"✅ **Payment Verified & Key Delivered!**\n\n"
                                 f"📦 Product: `{product_name}`\n"
-                                f"🔑 Your Key:\n`{delivered_key}`"
-                                f"{apk_text_section}\n"
+                                f"🔑 Your Key:\n`{delivered_key}`\n\n"
                                 f"(You can view your keys anytime using 'My Keys' in the menu)",
-                                reply_markup=markup_to_use,
                                 parse_mode="Markdown"
                             )
+                            
+                            # Automatically send the specific APK based on whether it's loader or bgmi
+                            is_loader = "loader" in product_code
+                            apk_filename = "loader.apk" if is_loader else "bgmi.apk"
+                            apk_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/apks/{apk_filename}"
+                            
+                            try:
+                                bot.send_document(
+                                    user_id,
+                                    document=apk_url,
+                                    caption=f"📥 Here is your application file for {product_name}!"
+                                )
+                            except Exception as doc_err:
+                                print("Error sending APK document:", doc_err)
+
                             del active_checkout_sessions[matched_order_id]
-                            return jsonify({"status": "success", "message": "Key delivered and QR deleted"}), 200
+                            return jsonify({"status": "success", "message": "Key and APK delivered"}), 200
                     else:
                         bot.send_message(
                             user_id,
@@ -459,6 +382,12 @@ def macro_webhook():
         return jsonify({"error": str(error)}), 200
 
 if __name__ == '__main__':
+    try:
+        bot.set_my_short_description("Get instant keys & files for Megha Bhai Loader & BGMI Mod!")
+        bot.set_my_description("Welcome to Megha Bhai Bot! Purchase instant keys and download files securely.")
+    except Exception as e:
+        print("Could not update bot descriptions:", e)
+
     webhook_url = f"{RENDER_URL}/bot/{TOKEN}"
     bot.remove_webhook()
     time.sleep(1)
