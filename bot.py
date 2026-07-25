@@ -30,25 +30,40 @@ user_purchased_keys = {}
 # --- GITHUB HELPERS ---
 def get_file_path_for_product(product_code):
     mapping = {
-        "buy_5hours": "keys_5h.txt",
-        "buy_1day": "keys_1d.txt",
-        "buy_3days": "keys_3d.txt",
-        "buy_7days": "keys_7d.txt",
-        "buy_30days": "keys_30d.txt",
-        "buy_season": "keys_season.txt"
+        # Loader Keys Folder
+        "buy_loader_5hours": "loader/keys_5h.txt",
+        "buy_loader_1day": "loader/keys_1d.txt",
+        "buy_loader_3days": "loader/keys_3d.txt",
+        "buy_loader_7days": "loader/keys_7d.txt",
+        "buy_loader_30days": "loader/keys_30d.txt",
+        "buy_loader_season": "loader/keys_season.txt",
+        
+        # BGMI Keys Folder
+        "buy_bgmi_5hours": "bgmi/keys_5h.txt",
+        "buy_bgmi_1day": "bgmi/keys_1d.txt",
+        "buy_bgmi_3days": "bgmi/keys_3d.txt",
+        "buy_bgmi_7days": "bgmi/keys_7d.txt",
+        "buy_bgmi_30days": "bgmi/keys_30d.txt",
+        "buy_bgmi_season": "bgmi/keys_season.txt"
     }
     return mapping.get(product_code)
 
 def get_product_details(product_code):
-    mapping = {
-        "buy_5hours": ("XSCILENT 5 HOURS", 40.0),
-        "buy_1day": ("XSCILENT 1 DAY", 100.0),
-        "buy_3days": ("XSCILENT 3 DAYS", 180.0),
-        "buy_7days": ("XSCILENT 7 DAYS", 300.0),
-        "buy_30days": ("XSCILENT 30 DAYS", 800.0),
-        "buy_season": ("XSCILENT FULL SEASON", 1200.0)
-    }
-    return mapping.get(product_code, ("Unknown Product", 0.0))
+    cat_prefix = "Xscilent Loader" if "loader" in product_code else "Xscilent Mod BGMI"
+    
+    if "5hours" in product_code:
+        return (f"{cat_prefix} - 5 HOURS", 40.0)
+    elif "1day" in product_code:
+        return (f"{cat_prefix} - 1 DAY", 100.0)
+    elif "3days" in product_code:
+        return (f"{cat_prefix} - 3 DAYS", 180.0)
+    elif "7days" in product_code:
+        return (f"{cat_prefix} - 7 DAYS", 300.0)
+    elif "30days" in product_code:
+        return (f"{cat_prefix} - 30 DAYS", 800.0)
+    elif "season" in product_code:
+        return (f"{cat_prefix} - FULL SEASON", 1200.0)
+    return ("Unknown Product", 0.0)
 
 def fetch_keys_from_github(file_path):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
@@ -138,16 +153,25 @@ def get_persistent_keyboard():
     )
     return markup
 
-def get_products_inline_menu():
+def get_products_category_menu():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🚀 Xscilent Loader", callback_data="cat_loader"),
+        InlineKeyboardButton("🎮 Xscilent Mod BGMI", callback_data="cat_bgmi")
+    )
+    return markup
+
+def get_duration_menu(category):
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("5 Hours - ₹40", callback_data="buy_5hours"),
-        InlineKeyboardButton("1 Day - ₹100", callback_data="buy_1day"),
-        InlineKeyboardButton("3 Days - ₹180", callback_data="buy_3days"),
-        InlineKeyboardButton("7 Days - ₹300", callback_data="buy_7days"),
-        InlineKeyboardButton("30 Days - ₹800", callback_data="buy_30days"),
-        InlineKeyboardButton("Full Season - ₹1200", callback_data="buy_season")
+        InlineKeyboardButton("5 Hours - ₹40", callback_data=f"buy_{category}_5hours"),
+        InlineKeyboardButton("1 Day - ₹100", callback_data=f"buy_{category}_1day"),
+        InlineKeyboardButton("3 Days - ₹180", callback_data=f"buy_{category}_3days"),
+        InlineKeyboardButton("7 Days - ₹300", callback_data=f"buy_{category}_7days"),
+        InlineKeyboardButton("30 Days - ₹800", callback_data=f"buy_{category}_30days"),
+        InlineKeyboardButton("Full Season - ₹1200", callback_data=f"buy_{category}_season")
     )
+    markup.add(InlineKeyboardButton("⬅️ Back to Categories", callback_data="back_to_categories"))
     return markup
 
 # --- TELEGRAM HANDLERS ---
@@ -164,8 +188,8 @@ def send_welcome(message):
 def handle_purchase_text(message):
     bot.send_message(
         message.chat.id,
-        "📦 **Select a plan to purchase:**",
-        reply_markup=get_products_inline_menu(),
+        "📦 **Select a product category:**",
+        reply_markup=get_products_category_menu(),
         parse_mode="Markdown"
     )
 
@@ -198,7 +222,7 @@ def handle_check_fund_text(message):
 def handle_how_to_buy_text(message):
     bot.send_message(
         message.chat.id,
-        "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your desired duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key will be delivered instantly upon payment verification!",
+        "📚 **How to Buy:**\n\n1. Click **Purchase Key** and select your product & duration.\n2. Scan the generated QR code using GPay, PhonePe, or Paytm.\n3. Complete the payment.\n4. Your key and download link will be delivered instantly upon payment verification!",
         parse_mode="Markdown"
     )
 
@@ -250,7 +274,37 @@ def handle_callback(call):
     chat_id = call.message.chat.id
     data = call.data
 
-    if data.startswith("buy_"):
+    if data == "cat_loader":
+        bot.edit_message_text(
+            "🚀 **Select a plan for Xscilent Loader:**",
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=get_duration_menu("loader"),
+            parse_mode="Markdown"
+        )
+        return
+
+    elif data == "cat_bgmi":
+        bot.edit_message_text(
+            "🎮 **Select a plan for Xscilent Mod BGMI:**",
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=get_duration_menu("bgmi"),
+            parse_mode="Markdown"
+        )
+        return
+
+    elif data == "back_to_categories":
+        bot.edit_message_text(
+            "📦 **Select a product category:**",
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=get_products_category_menu(),
+            parse_mode="Markdown"
+        )
+        return
+
+    elif data.startswith("buy_"):
         product_name, price = get_product_details(data)
         file_path = get_file_path_for_product(data)
         
@@ -311,7 +365,7 @@ def handle_callback(call):
 # --- FLASK WEB SERVER & WEBHOOK ROUTES ---
 @app.route('/')
 def home():
-    return "Telegram UPI Bot with Stock Protection is running successfully!"
+    return "Telegram UPI Bot with Multiple Products & Stock Protection is running successfully!"
 
 @app.route(f'/bot/{TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -368,9 +422,26 @@ def macro_webhook():
                             except Exception as del_err:
                                 print("Could not delete QR message:", del_err)
                             
+                            apks = get_available_apks()
+                            apk_text_section = ""
+                            success_markup = InlineKeyboardMarkup()
+                            
+                            if apks:
+                                apk_text_section = "\n\n📥 **Download App:**\n"
+                                for apk in apks:
+                                    apk_text_section += f"🔹 [{apk['name']}]({apk['url']})\n"
+                                    success_markup.add(InlineKeyboardButton(f"📥 Download {apk['name']}", url=apk['url']))
+                            
+                            markup_to_use = success_markup if apks else None
+
                             bot.send_message(
                                 user_id,
-                                f"✅ **Payment Verified & Key Delivered!**\n\n📦 Product: `{product_name}`\n🔑 Your Key:\n`{delivered_key}`\n\n(You can view your keys anytime using 'My Keys' in the menu)",
+                                f"✅ **Payment Verified & Key Delivered!**\n\n"
+                                f"📦 Product: `{product_name}`\n"
+                                f"🔑 Your Key:\n`{delivered_key}`"
+                                f"{apk_text_section}\n"
+                                f"(You can view your keys anytime using 'My Keys' in the menu)",
+                                reply_markup=markup_to_use,
                                 parse_mode="Markdown"
                             )
                             del active_checkout_sessions[matched_order_id]
